@@ -8,10 +8,14 @@ num_candidates: 32
 max_context_entries: 20  # Max history entries to show LLM (null = no limit)
 
 llm_config:
-  model: openai/gpt-5.1 # anthropic/claude-sonnet-4-5-20250929 
+  # Change this string to swap planner models served by vLLM.
+  model: openai/Qwen/Qwen3-30B-A3B-Instruct-2507
+  base_url: http://127.0.0.1:8000/v1
+  api_key_env: VLLM_API_KEY
   max_output_tokens: null
   temperature: null
   cache: false  # cache responses in dspy
+  extra_kwargs: {}
 
 # how to parse the state for the LLM
 context_config:

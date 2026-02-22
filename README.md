@@ -39,6 +39,28 @@ export OPENAI_API_KEY=your_key  # for OpenAI agents
 
 Add these API keys to Modal secrets too if running on Modal.
 
+### Using a local vLLM server for LLM-based agents (Open models)
+
+LLM-based planner/scorer/orchestrator configs can also use an OpenAI-compatible local endpoint (e.g., vLLM).
+
+Example (serving `Qwen/Qwen3-30B-A3B-Instruct-2507`):
+
+```bash
+vllm serve Qwen/Qwen3-30B-A3B-Instruct-2507 \
+  --host 0.0.0.0 \
+  --port 8000 \
+  --api-key local-token
+
+export VLLM_API_KEY=local-token
+```
+
+The default LLM configs in `configs/agent/llm_react_orchestrator.yaml`, `configs/agent/planner/llm.yaml`, and `configs/agent/scorer/llm.yaml` are set up for this pattern using:
+- `llm_config.model`
+- `llm_config.base_url`
+- `llm_config.api_key_env`
+
+To change models later, update `llm_config.model` (for example to `openai/Qwen/Qwen2.5-32B-Instruct`) and keep the `openai/` prefix for DSPy compatibility.
+
 Update the wandb entity in `configs/logger/wandb.yaml` to your wandb username/team if you want to save progress to wandb. Otherwise, set `use_wandb: false`.
 
 ## Quick Start

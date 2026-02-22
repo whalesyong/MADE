@@ -2,10 +2,14 @@ _target_: made.agents.scorers.LLMScorer
 
 # LLM backend configuration (mirrors planner config)
 llm_config:
-  model: openai/gpt-5.1 # anthropic/claude-sonnet-4-5-20250929 
+  # Change this string to swap scorer models served by vLLM.
+  model: openai/Qwen/Qwen3-30B-A3B-Instruct-2507
+  base_url: http://127.0.0.1:8000/v1
+  api_key_env: VLLM_API_KEY
   max_output_tokens: null
   temperature: null
   cache: false
+  extra_kwargs: {}
 
 # Context window management - random sample if exceeded
 max_candidates: 50  # Max candidates to show LLM (null = no limit)
@@ -32,4 +36,3 @@ context_config:
   include_composition_counter: true
   include_recent_trial: true
   previous_observations: 1 
-

@@ -8,6 +8,7 @@ from typing import Any
 import dspy
 from pymatgen.core.composition import Composition
 
+from ...utils.dspy_lm import build_dspy_lm
 from ...utils.llm import summarize_context_for_llm
 from ..base import Plan, Planner
 
@@ -107,12 +108,7 @@ class LLMPlanner(Planner):
         self, state: dict[str, Any], previous: dict[str, Any] | None = None
     ) -> Plan:
         with dspy.settings.context(
-            lm=dspy.LM(
-                model=self.llm_config.model,
-                max_tokens=self.llm_config.max_output_tokens,
-                temperature=self.llm_config.temperature,
-                cache=self.llm_config.cache,
-            )
+            lm=build_dspy_lm(self.llm_config)
         ):
             stability_tolerance = state.get("stability_tolerance", 1e-8)
             context = summarize_context_for_llm(

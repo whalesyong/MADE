@@ -26,6 +26,7 @@ from pymatgen.core.composition import Composition
 from pymatgen.core.structure import Structure
 
 from made.agents.base import Agent, Filter, Generator, Plan, Scorer
+from made.utils.dspy_lm import build_dspy_lm
 from made.utils.structure_hash import structure_hash
 
 logger = logging.getLogger(__name__)
@@ -918,19 +919,15 @@ class LLMReActOrchestratorAgent(Agent):
     def _setup_dspy(self):
         """Setup DSPy LM."""
         try:
-            model = self.llm_config.get("model", "anthropic/claude-sonnet-4-20250514")
-            cache = self.llm_config.get("cache", True)
-            max_tokens = self.llm_config.get("max_output_tokens")
-            temperature = self.llm_config.get("temperature")
-
-            kwargs = {"cache": cache}
-            if max_tokens:
-                kwargs["max_tokens"] = max_tokens
-            if temperature is not None:
-                kwargs["temperature"] = temperature
-
-            self.lm = dspy.LM(model, **kwargs)
-            logger.info(f"[LLMReActOrchestrator] DSPy LM: {model}")
+            self.lm = build_dspy_lm(self.llm_config)
+            model = self.llm_config.get("model", "unknown")
+            base_url = self.llm_config.get("base_url") or self.llm_config.get("api_base")
+            if base_url:
+                logger.info(
+                    f"[LLMReActOrchestrator] DSPy LM: {model} (api_base={base_url})"
+                )
+            else:
+                logger.info(f"[LLMReActOrchestrator] DSPy LM: {model}")
         except Exception as e:
             logger.error(f"[LLMReActOrchestrator] Failed to initialize DSPy LM: {e}")
             raise
