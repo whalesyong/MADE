@@ -13,6 +13,7 @@ from ...utils.llm import (
     summarize_candidates_for_llm,
     summarize_context_for_llm,
 )
+from ...utils.llm_trace import append_llm_trace
 from ..base import Scorer, ScoreResult
 
 logger = logging.getLogger(__name__)
@@ -124,6 +125,17 @@ class LLMScorer(Scorer):
                 stability_tolerance=stability_tolerance,
             )
             self.history.append(pred.toDict())
+            append_llm_trace(
+                component="scorer",
+                llm_config=self.llm_config,
+                output=pred.toDict(),
+                inputs={
+                    "num_candidates": len(candidates),
+                    "num_candidates_shown": len(summaries),
+                    "stability_tolerance": stability_tolerance,
+                },
+            )
+
 
             # Map LLM's selected index back to original candidate index
             llm_selected_index = pred.selected_index

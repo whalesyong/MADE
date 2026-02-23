@@ -28,6 +28,8 @@ from pymatgen.core.structure import Structure
 from made.agents.base import Agent, Filter, Generator, Plan, Scorer
 from made.utils.dspy_lm import build_dspy_lm
 from made.utils.structure_hash import structure_hash
+from made.utils.llm_trace import append_llm_trace
+
 
 logger = logging.getLogger(__name__)
 
@@ -1001,6 +1003,21 @@ class LLMReActOrchestratorAgent(Agent):
                 )
 
             logger.info(f"[LLMReActOrchestrator] Result: {result.answer}")
+            append_llm_trace(
+                component="orchestrator",
+                llm_config=self.llm_config,
+                output=getattr(result, "toDict", lambda: {"answer": getattr(result, "answer", str(result))})(),
+                inputs={
+                    "chemical_system": self.chemical_system_elements,
+                    "max_stoichiometry": self.max_stoichiometry,
+                    "max_iters": self.max_iters,
+                    "enabled_tools": self.enabled_tools,
+                },
+                extra={
+                    "buffer_compositions": len(self.buffer),
+                    "evaluation_history_len": len(self.evaluation_history),
+                },
+            )
 
             selected = tools.get_selected_structure()
 

@@ -10,6 +10,7 @@ from pymatgen.analysis.phase_diagram import PDEntry, PhaseDiagram
 from pymatgen.core.structure import Structure
 
 from made.utils.convex_hull_utils import safe_e_above_hull
+from made.utils.llm_trace import append_llm_trace
 
 
 def pd_from_state(state: dict[str, Any]) -> PhaseDiagram | None:

@@ -48,7 +48,7 @@ llm_config:
   # Change this string to swap orchestrator models (served by vLLM).
   # Format should remain provider-prefixed for DSPy/LiteLLM compatibility.
   # Example: openai/Qwen/Qwen2.5-32B-Instruct
-  model: "openai/Qwen/Qwen3-30B-A3B-Instruct-2507"
+  model: "openai/Qwen/Qwen3-30B-A3B-Instruct-2507-FP8"
   # OpenAI-compatible vLLM endpoint
   base_url: "http://127.0.0.1:8000/v1"
   # Env var containing the vLLM API key (set to your --api-key value)
@@ -58,6 +58,9 @@ llm_config:
   temperature: null
   # Optional passthrough kwargs to DSPy/LiteLLM client
   extra_kwargs: {}
+  trace_outputs: true         # enable JSONL tracing
+  trace_inputs: false         # set true if you also want input metadata
+  trace_file: null            # null => ./llm_traces.jsonl or $MADE_LLM_TRACE_PATH
 
 # Context configuration with customizable prompts
 context_config:

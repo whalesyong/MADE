@@ -190,7 +190,7 @@ def run_multi_systems(config: DictConfig) -> None:
                                     )
                 else:
                     for ep in tqdm.trange(num_episodes, desc=f"Episodes ({system_id})"):
-                        result = rb.run_episode.local(
+                        result = rb.run_episode_local(
                             cfg_this,
                             ep,
                             wandb_run_name=wandb_run_name,

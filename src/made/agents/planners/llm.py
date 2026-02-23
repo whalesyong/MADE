@@ -10,6 +10,7 @@ from pymatgen.core.composition import Composition
 
 from ...utils.dspy_lm import build_dspy_lm
 from ...utils.llm import summarize_context_for_llm
+from ...utils.llm_trace import append_llm_trace
 from ..base import Plan, Planner
 
 logger = logging.getLogger(__name__)
@@ -127,6 +128,18 @@ class LLMPlanner(Planner):
                 stability_tolerance=stability_tolerance,
             )
             self.history.append(pred.toDict())
+            append_llm_trace(
+                component="planner",
+                llm_config=self.llm_config,
+                output=pred.toDict(),
+                inputs={
+                    "elements": state.get("elements", []),
+                    "max_stoichiometry": self.max_stoichiometry,
+                    "num_compositions": self.num_compositions,
+                    "stability_tolerance": stability_tolerance,
+                },
+            )
+
             logger.info(
                 f"LLMPlanner proposed compositions: {pred.compositions}, reasoning: {pred.reasoning}"
             )

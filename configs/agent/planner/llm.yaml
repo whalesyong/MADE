@@ -9,13 +9,17 @@ max_context_entries: 20  # Max history entries to show LLM (null = no limit)
 
 llm_config:
   # Change this string to swap planner models served by vLLM.
-  model: openai/Qwen/Qwen3-30B-A3B-Instruct-2507
+  model: openai/Qwen/Qwen3-30B-A3B-Instruct-2507-FP8
   base_url: http://127.0.0.1:8000/v1
   api_key_env: VLLM_API_KEY
   max_output_tokens: null
   temperature: null
   cache: false  # cache responses in dspy
   extra_kwargs: {}
+  trace_outputs: true         # enable JSONL tracing
+  trace_inputs: false         # set true if you also want input metadata
+  trace_file: null            # null => ./llm_traces.jsonl or $MADE_LLM_TRACE_PATH
+
 
 # how to parse the state for the LLM
 context_config:
