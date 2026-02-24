@@ -18,7 +18,7 @@ Key features:
 
 import logging
 from typing import Any
-
+import time, random
 import dspy
 import numpy as np
 from pymatgen.analysis.phase_diagram import PDEntry, PhaseDiagram
@@ -195,8 +195,36 @@ class OrchestratorTools:
         )
 
         try:
-            structures = generator.generate(plan, self.state)
-
+            MAX_TRIES = 5
+            structures = None
+            last_err = None
+            
+            for attempt in range(1, MAX_TRIES + 1):
+                try:
+                    structures = generator.generate(plan, self.state)
+                    last_err = None
+                    break  # success
+                except Exception as e:
+                    last_err = e
+                    msg = str(e).lower()
+            
+                    # Only retry on transient file/corruption-like errors
+                    if "empty file" in msg or "unexpected end of file" in msg:
+                        # backoff: 0.5, 1, 2, 4, 8 (capped) + small jitter
+                        sleep_s = min(8.0, 0.5 * (2 ** (attempt - 1))) + random.random() * 0.2
+                        logger.warning(
+                            f"[Tool] {generator_name} generate() failed ({attempt}/{MAX_TRIES}): {e}. "
+                            f"Retrying in {sleep_s:.2f}s"
+                        )
+                        time.sleep(sleep_s)
+                        continue
+            
+                    # Non-transient: don't hide it
+                    raise
+            
+            if last_err is not None and structures is None:
+                raise last_err
+            
             if not structures:
                 return f"Generator {generator_name} produced no structures."
 
@@ -276,8 +304,8 @@ class OrchestratorTools:
             return msg
 
         except Exception as e:
-            logger.error(f"[Tool] Generation failed: {e}")
-            return f"Error during generation: {e}"
+            logger.error(f"[Tool] Generation failed in '{generator_name}': {e}")
+            return f"Error during generation in '{generator_name}': {e}"
 
     def score_buffer(self, scorer_name: str, composition: str = "") -> str:
         """Score candidates in the buffer using a specified scorer.
