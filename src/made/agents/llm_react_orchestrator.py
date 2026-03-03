@@ -1020,6 +1020,7 @@ class LLMReActOrchestratorAgent(Agent):
 
         # Run ReAct
         try:
+            history_before = len(getattr(self.lm, "history", []))
             with dspy.context(lm=self.lm):
                 result = react_module(
                     chemical_system=", ".join(self.chemical_system_elements),
@@ -1029,6 +1030,8 @@ class LLMReActOrchestratorAgent(Agent):
                     evaluation_history=history_str,
                     known_stable_materials=stable_materials_str,
                 )
+            history_after = len(getattr(self.lm, "history", []))
+            lm_calls = getattr(self.lm, "history", [])[history_before:history_after]
 
             logger.info(f"[LLMReActOrchestrator] Result: {result.answer}")
             append_llm_trace(
@@ -1044,6 +1047,8 @@ class LLMReActOrchestratorAgent(Agent):
                 extra={
                     "buffer_compositions": len(self.buffer),
                     "evaluation_history_len": len(self.evaluation_history),
+                    "num_lm_calls": len(lm_calls),
+                    "lm_calls": lm_calls,
                 },
             )
 

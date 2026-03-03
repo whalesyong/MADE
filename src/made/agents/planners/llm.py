@@ -108,8 +108,9 @@ class LLMPlanner(Planner):
     def propose(
         self, state: dict[str, Any], previous: dict[str, Any] | None = None
     ) -> Plan:
+        lm = build_dspy_lm(self.llm_config)
         with dspy.settings.context(
-            lm=build_dspy_lm(self.llm_config)
+            lm=lm
         ):
             stability_tolerance = state.get("stability_tolerance", 1e-8)
             context = summarize_context_for_llm(
@@ -128,6 +129,7 @@ class LLMPlanner(Planner):
                 stability_tolerance=stability_tolerance,
             )
             self.history.append(pred.toDict())
+            lm_call = lm.history[-1] if getattr(lm, "history", None) else None
             append_llm_trace(
                 component="planner",
                 llm_config=self.llm_config,
@@ -138,6 +140,7 @@ class LLMPlanner(Planner):
                     "num_compositions": self.num_compositions,
                     "stability_tolerance": stability_tolerance,
                 },
+                extra={"lm_call": lm_call},
             )
 
             logger.info(

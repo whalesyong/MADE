@@ -122,6 +122,8 @@ results/<timestamp>-<oracle>-<agent>/
 │   ├── episodes.json            # Per-episode metrics
 │   ├── episodes.csv             # Per-episode metrics (CSV format)
 │   └── phase_diagram_gt.png     # Ground truth phase diagram
+├── llm_traces/
+│   └── episode_000.jsonl        # Per-episode LLM traces (planner/scorer/orchestrator + LM call history)
 └── run_benchmark.log            # Execution log
 ```
 
@@ -135,6 +137,8 @@ results/baselines_<date>/
     ├── overall_summary/           # Aggregated metrics across all systems
     │   ├── summary.json           # Summary statistics (mean/std/sem)
     │   └── per_system_summary.csv # Per-system breakdown
+    ├── llm_traces/
+    │   └── <system_id>/episode_000.jsonl
     └── systems/
         └── <system_id>/           # e.g., Co-Mg-Na
             ├── trajectories/

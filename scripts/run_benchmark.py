@@ -252,6 +252,22 @@ def run_episode_local(
         force=True,  # Override any existing handlers
     )
 
+    # Configure per-episode LLM trace path so all LLM outputs are saved under experiment output dir.
+    trace_root = Path(config.experiment.output_dir) / "llm_traces"
+    if system_id:
+        trace_path = trace_root / system_id / f"episode_{episode_id:03d}.jsonl"
+    else:
+        trace_path = trace_root / f"episode_{episode_id:03d}.jsonl"
+    os.environ["MADE_LLM_TRACE_PATH"] = str(trace_path)
+    os.environ["MADE_EXPERIMENT_OUTPUT_DIR"] = str(config.experiment.output_dir)
+    os.environ["MADE_RUN_NAME"] = str(wandb_run_name)
+    os.environ["MADE_EPISODE_ID"] = str(episode_id)
+    if system_id:
+        os.environ["MADE_SYSTEM_ID"] = system_id
+    else:
+        os.environ.pop("MADE_SYSTEM_ID", None)
+    logger.info(f"LLM traces will be appended to {trace_path}")
+
     # Check for existing checkpoint first to get wandb run ID if resuming
     checkpoint_path, checkpoint = find_checkpoint_by_episode(episode_id, wandb_run_name, system_id)
     wandb_run_id = None

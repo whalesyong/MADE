@@ -70,6 +70,15 @@ def append_llm_trace(
         "pid": os.getpid(),
         "output": _json_safe(output),
     }
+    run_meta = {
+        "experiment_output_dir": os.getenv("MADE_EXPERIMENT_OUTPUT_DIR"),
+        "run_name": os.getenv("MADE_RUN_NAME"),
+        "system_id": os.getenv("MADE_SYSTEM_ID"),
+        "episode_id": os.getenv("MADE_EPISODE_ID"),
+    }
+    run_meta = {k: v for k, v in run_meta.items() if v is not None}
+    if run_meta:
+        record["run"] = run_meta
 
     if _cfg_get(llm_config, "trace_inputs", False) and inputs is not None:
         record["inputs"] = _json_safe(inputs)

@@ -99,8 +99,9 @@ class LLMScorer(Scorer):
         if not candidates:
             raise ValueError("No candidates provided")
 
+        lm = build_dspy_lm(self.llm_config)
         with dspy.settings.context(
-            lm=build_dspy_lm(self.llm_config)
+            lm=lm
         ):
             stability_tolerance = state.get("stability_tolerance", 1e-8)
             context = summarize_context_for_llm(
@@ -125,6 +126,7 @@ class LLMScorer(Scorer):
                 stability_tolerance=stability_tolerance,
             )
             self.history.append(pred.toDict())
+            lm_call = lm.history[-1] if getattr(lm, "history", None) else None
             append_llm_trace(
                 component="scorer",
                 llm_config=self.llm_config,
@@ -134,6 +136,7 @@ class LLMScorer(Scorer):
                     "num_candidates_shown": len(summaries),
                     "stability_tolerance": stability_tolerance,
                 },
+                extra={"lm_call": lm_call},
             )
 
 
