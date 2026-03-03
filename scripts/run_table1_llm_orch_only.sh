@@ -31,6 +31,7 @@ BUDGET="${BUDGET:-50}"
 NUM_EPISODES="${NUM_EPISODES:-5}"
 STABILITY_TOLERANCE="${STABILITY_TOLERANCE:-0.1}"
 OUTPUT_DIR="${OUTPUT_DIR:-./results/baselines}"
+
 MAX_STOICHIOMETRY="${MAX_STOICHIOMETRY:-20}"
 
 # Fail fast by default if one system run errors.
@@ -50,14 +51,15 @@ fi
 # LLM backend preflight checks.
 CHECK_LLM_BACKEND="${CHECK_LLM_BACKEND:-1}"
 REQUIRE_API_KEY="${REQUIRE_API_KEY:-1}"
-LLM_BASE_URL="${LLM_BASE_URL:-http://127.0.0.1:8000/v1}"
+
+LLM_BASE_URL="${LLM_BASE_URL:-http://127.0.0.1:8004/v1}"
 LLM_HEALTH_PATH="${LLM_HEALTH_PATH:-/models}"
 LLM_CHECK_TIMEOUT="${LLM_CHECK_TIMEOUT:-5}"
 
 SYSTEM_FILES=(
   "./data/systems_10_mp_20/systems_ternary_n10_maxatoms20_intermetallic_smact.json"
-  "./data/systems_10_mp_20/systems_quaternary_n10_maxatoms20_intermetallic_smact.json"
-  "./data/systems_10_mp_20/systems_quinary_n10_maxatoms20_intermetallic_smact.json"
+  #"./data/systems_10_mp_20/systems_quaternary_n10_maxatoms20_intermetallic_smact.json"
+  #"./data/systems_10_mp_20/systems_quinary_n10_maxatoms20_intermetallic_smact.json"
 )
 
 if [[ "${REQUIRE_API_KEY}" == "1" ]] && [[ -z "${VLLM_API_KEY:-}" ]]; then
@@ -96,6 +98,7 @@ if [[ "${CHECK_LLM_BACKEND}" == "1" ]]; then
       exit 1
     else
       echo "ERROR: LLM backend check failed at ${CHECK_URL} (HTTP ${HTTP_CODE})."
+
       echo "Start/fix your backend, then rerun (or set CHECK_LLM_BACKEND=0 to bypass)."
       exit 1
     fi
