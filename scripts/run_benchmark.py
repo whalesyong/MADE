@@ -198,6 +198,38 @@ def load_checkpoint(checkpoint_path: Path) -> dict[str, Any] | None:
         return None
 
 
+def get_reflections_path(
+    config: DictConfig, system_id: str | None = None
+) -> Path:
+    """Return the path to the inter-episode reflections file for this run/system."""
+    reflections_root = Path(config.experiment.output_dir) / "reflections"
+    if system_id:
+        return reflections_root / system_id / "reflections.json"
+    return reflections_root / "reflections.json"
+
+
+def load_reflections(reflections_path: Path) -> list[str]:
+    """Load reflections from disk; return empty list if file does not exist."""
+    if not reflections_path.exists():
+        return []
+    try:
+        with open(reflections_path) as f:
+            return json.load(f)
+    except Exception as e:
+        logger.warning(f"Failed to load reflections from {reflections_path}: {e}")
+        return []
+
+
+def save_reflections(reflections_path: Path, reflections: list[str]) -> None:
+    """Atomically save reflections list to disk."""
+    reflections_path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = reflections_path.with_suffix(".tmp.json")
+    with open(tmp, "w") as f:
+        json.dump(reflections, f, indent=2)
+    tmp.replace(reflections_path)
+    logger.info(f"Saved {len(reflections)} reflection(s) to {reflections_path}")
+
+
 def restore_environment_from_trajectory(
     env, trajectory: list[dict[str, Any]]
 ) -> None:
@@ -318,6 +350,18 @@ def run_episode_local(
     oracle = instantiate(config.oracle)
     env = instantiate(config.environment, dataset=dataset, oracle=oracle)
     agent = instantiate(config.agent)
+
+    # Reflexion: inject reflections from prior episodes (episode_id > 0 only)
+    reflexion_enabled = OmegaConf.select(config, "agent.enable_reflexion", default=False)
+    if reflexion_enabled and episode_id > 0 and hasattr(agent, "reflections"):
+        reflections_path = get_reflections_path(config, system_id)
+        prior_reflections = load_reflections(reflections_path)
+        if prior_reflections:
+            agent.reflections = prior_reflections
+            logger.info(
+                f"[Reflexion] Loaded {len(prior_reflections)} prior reflection(s) for episode {episode_id}"
+            )
+
     results = {
         "metrics": {},
         "trajectory": [],
@@ -422,6 +466,16 @@ def run_episode_local(
         }
     )
     logger.info(f"Final metrics: {json.dumps(final_metrics, indent=2)}")
+
+    # Reflexion: generate self-reflection and persist for the next episode
+    if reflexion_enabled and hasattr(agent, "generate_reflection"):
+        stability_tolerance = OmegaConf.select(
+            config, "environment.stability_tolerance", default=1e-8
+        )
+        agent.generate_reflection(env.get_latest_metrics(), stability_tolerance)
+        if agent.reflections:
+            reflections_path = get_reflections_path(config, system_id)
+            save_reflections(reflections_path, agent.reflections)
     results["metrics"] = final_metrics
     results["trajectory"] = trajectory
     results["final_env_state"] = (

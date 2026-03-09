@@ -325,23 +325,37 @@ def compute_discovery_curve_metrics(
     if not metrics_histories:
         return {}
 
-    # Extract discovery curves (queries_used, num_discoveries)
-    curves = []
-    for history in metrics_histories:
-        queries = [h.get("queries_used", i+1) for i, h in enumerate(history)]
-        discoveries = [h.get("num_newly_discovered_stable", 0) for h in history]
-        curves.append((queries, discoveries))
+    metric_key = "num_newly_discovered_stable"
+    query_key = "queries_used"
 
     if budget is None:
-        budget = max(max(q) for q, _ in curves)
-
-    # Compute metrics for each episode
-    audc_values = []
-    for queries, discoveries in curves:
-        audc = DiscoveryCurveMetrics.area_under_discovery_curve(
-            queries, discoveries, budget
+        budget = max(
+            int(history[-1].get(query_key, len(history)))
+            for history in metrics_histories
+            if history
         )
-        audc_values.append(audc)
+
+    # Compute AUDC from each episode history using current DiscoveryCurveMetrics API
+    audc_values = [
+        DiscoveryCurveMetrics.area_under_discovery_curve(
+            metrics_history=history,
+            metric_key=metric_key,
+            query_key=query_key,
+            normalize=False,
+        )
+        for history in metrics_histories
+        if history
+    ]
+    audc_norm_values = [
+        DiscoveryCurveMetrics.area_under_discovery_curve(
+            metrics_history=history,
+            metric_key=metric_key,
+            query_key=query_key,
+            normalize=True,
+        )
+        for history in metrics_histories
+        if history
+    ]
 
     n = len(audc_values)
     results = {
@@ -351,48 +365,56 @@ def compute_discovery_curve_metrics(
             "sem": float(np.std(audc_values) / np.sqrt(n)) if n > 0 else 0.0,
         },
         "area_under_discovery_curve_normalized": {
-            "mean": float(np.mean(audc_values)) / budget,
-            "std": float(np.std(audc_values)) / budget,
-            "sem": float(np.std(audc_values) / np.sqrt(n) / budget) if n > 0 else 0.0,
+            "mean": float(np.mean(audc_norm_values)),
+            "std": float(np.std(audc_norm_values)),
+            "sem": float(np.std(audc_norm_values) / np.sqrt(n)) if n > 0 else 0.0,
         },
     }
 
     # Compute AF/EF if baseline provided
     if baseline_histories:
-        baseline_curves = []
-        for history in baseline_histories:
-            queries = [h.get("queries_used", i+1) for i, h in enumerate(history)]
-            discoveries = [h.get("num_newly_discovered_stable", 0) for h in history]
-            baseline_curves.append((queries, discoveries))
-
-        # Average baseline curve
-        baseline_discoveries = np.mean([d for _, d in baseline_curves], axis=0)
-
         af_values = []
         ef_values = []
-        for queries, discoveries in curves:
+
+        # If lengths match, pair episode-by-episode. Otherwise compare against
+        # the first baseline history (simple fallback that preserves compatibility).
+        if len(baseline_histories) == len(metrics_histories):
+            baseline_for_episode = baseline_histories
+        elif baseline_histories:
+            baseline_for_episode = [baseline_histories[0]] * len(metrics_histories)
+        else:
+            baseline_for_episode = []
+
+        for history, baseline_history in zip(metrics_histories, baseline_for_episode):
+            if not history or not baseline_history:
+                continue
             af = DiscoveryCurveMetrics.acceleration_factor(
-                queries, discoveries, list(range(1, len(baseline_discoveries)+1)),
-                list(baseline_discoveries), k=max(discoveries) // 2 or 1
+                history,
+                baseline_history,
+                metric_key=metric_key,
+                query_key=query_key,
             )
             ef = DiscoveryCurveMetrics.enhancement_factor(
-                queries, discoveries, list(range(1, len(baseline_discoveries)+1)),
-                list(baseline_discoveries), t=budget // 2
+                history,
+                baseline_history,
+                metric_key=metric_key,
+                query_key=query_key,
             )
-            af_values.append(af)
-            ef_values.append(ef)
+            af_values.append(float(af))
+            ef_values.append(float(ef))
 
         n_af = len(af_values)
-        results["acceleration_factor"] = {
-            "mean": float(np.mean(af_values)),
-            "std": float(np.std(af_values)),
-            "sem": float(np.std(af_values) / np.sqrt(n_af)) if n_af > 0 else 0.0,
-        }
-        results["enhancement_factor"] = {
-            "mean": float(np.mean(ef_values)),
-            "std": float(np.std(ef_values)),
-            "sem": float(np.std(ef_values) / np.sqrt(n_af)) if n_af > 0 else 0.0,
-        }
+        if n_af > 0:
+            results["acceleration_factor"] = {
+                "mean": float(np.mean(af_values)),
+                "std": float(np.std(af_values)),
+                "sem": float(np.std(af_values) / np.sqrt(n_af)),
+            }
+            results["enhancement_factor"] = {
+                "mean": float(np.mean(ef_values)),
+                "std": float(np.std(ef_values)),
+                "sem": float(np.std(ef_values) / np.sqrt(n_af)),
+            }
 
     return results
 

@@ -104,6 +104,47 @@ to run the random generator and chemeleon generative baseline on ternary interme
 
 This will save results to `./results/baselines/`, or on a Modal volume if running on Modal.
 
+### LLM Orchestrator experiments
+
+The `llm_react_orchestrator` agent config uses a vLLM-served open model (default: `Qwen/Qwen3-30B-A3B-Instruct-2507`). First serve the model, then run the sweep:
+
+```bash
+# 1. Serve the model
+vllm serve Qwen/Qwen3-30B-A3B-Instruct-2507 \
+  --host 0.0.0.0 --port 8000 --api-key local-token
+export VLLM_API_KEY=local-token
+
+# 2. Run LLM orchestrator baseline (5 episodes per system, ternary systems)
+uv run scripts/run_baseline_experiments.py \
+    --agent-configs llm_react_orchestrator \
+    --systems-file ./data/systems_10_mp_20/systems_ternary_n10_maxatoms20_intermetallic_smact.json \
+    --num-episodes 5 \
+    --budget 50 \
+    --max-systems 10
+
+# 3. Same sweep with Reflexion enabled (inter-episode verbal reflection)
+uv run scripts/run_baseline_experiments.py \
+    --agent-configs llm_react_orchestrator \
+    --systems-file ./data/systems_10_mp_20/systems_ternary_n10_maxatoms20_intermetallic_smact.json \
+    --num-episodes 5 \
+    --budget 50 \
+    --max-systems 10 \
+    --reflexion
+
+# 4. Ablation: compare with and without Reflexion in one invocation
+uv run scripts/run_baseline_experiments.py \
+    --agent-configs "llm_react_orchestrator llm_react_orchestrator" \
+    --systems-file ./data/systems_10_mp_20/systems_ternary_n10_maxatoms20_intermetallic_smact.json \
+    --num-episodes 5 \
+    --budget 50 \
+    --max-systems 10
+# (then re-run the second config with --reflexion separately to produce comparable output dirs)
+```
+
+The `--reflexion` flag only affects agents that have `enable_reflexion` in their config (i.e., `llm_react_orchestrator`). It is silently ignored for non-LLM agents such as `random_generator_baseline`.
+
+Reflexion saves per-system reflection files under `results/.../reflections/<system_id>/reflections.json` and LLM traces for each reflection call under `llm_traces/<system_id>/episode_NNN.jsonl`.
+
 ## Results Format
 
 ### Single Run (`run_benchmark.py`)

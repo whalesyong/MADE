@@ -92,8 +92,44 @@ class OrchestratorReActSignature(dspy.Signature):
         desc="Known stable materials from phase diagram"
     )
 
+    prior_reflections: str = dspy.InputField(
+        desc="Lessons learned from previous episodes on this chemical system. Use these to avoid repeating mistakes and build on successful strategies from the start."
+    )
+
     answer: str = dspy.OutputField(
         desc="Summary of actions taken and final selection rationale"
+    )
+
+
+class SelfReflectionSignature(dspy.Signature):
+    """You are reviewing a completed materials discovery episode to extract lessons for the next episode on the same chemical system.
+
+    Analyze what happened and produce specific, actionable insights.
+    Focus on:
+    - Which composition families were productive (stable/novel) vs. consistently wasteful
+    - Whether the exploration/exploitation balance was right
+    - Patterns in what succeeded: stoichiometries, unit cell sizes, element ratios
+    - Mistakes or inefficiencies to avoid repeating
+    - Concrete strategy changes for the next episode
+
+    Be specific and concise. Write 3-5 bullet points. Avoid vague advice like "explore more".
+    """
+
+    chemical_system: str = dspy.InputField(
+        desc="The chemical system being explored (e.g., 'Li, O')"
+    )
+    episode_trajectory: str = dspy.InputField(
+        desc="All oracle evaluations from the completed episode: compositions, e_above_hull, stability, and novelty status"
+    )
+    episode_outcome: str = dspy.InputField(
+        desc="Quantitative summary: novel stable structures found, recall achieved, oracle queries used"
+    )
+    prior_reflections: str = dspy.InputField(
+        desc="Lessons from previous episodes on this system (empty if this is the first episode)"
+    )
+
+    reflection: str = dspy.OutputField(
+        desc="Concise, actionable lessons for the next episode as bullet points identifying what to do differently."
     )
 
 
@@ -874,6 +910,9 @@ class LLMReActOrchestratorAgent(Agent):
         max_stoichiometry: int = 20,
         # History
         max_history_length: int = 20,
+        # Reflexion
+        enable_reflexion: bool = False,
+        max_reflections: int = 3,
         **kwargs: Any,
     ):
         """
@@ -893,6 +932,9 @@ class LLMReActOrchestratorAgent(Agent):
             max_iters: Maximum ReAct iterations per step
             max_stoichiometry: Maximum atoms per structure
             max_history_length: Maximum evaluation history entries
+            enable_reflexion: If True, agent generates a verbal self-reflection after each
+                episode and uses accumulated reflections to guide subsequent episodes.
+            max_reflections: Sliding window size for the reflection memory buffer (default 3).
         """
         # Initialize base Agent (sets self.last_step = 0)
         super().__init__()
@@ -910,6 +952,14 @@ class LLMReActOrchestratorAgent(Agent):
         self.max_iters = max_iters
         self.max_stoichiometry = max_stoichiometry
         self.max_history_length = max_history_length
+
+        # Reflexion
+        self.enable_reflexion = enable_reflexion
+        self.max_reflections = max_reflections
+        self.reflections: list[str] = []
+        self.self_reflection_module = (
+            dspy.ChainOfThought(SelfReflectionSignature) if enable_reflexion else None
+        )
 
         # Enabled tools
         all_tools = [
@@ -979,6 +1029,7 @@ class LLMReActOrchestratorAgent(Agent):
         buffer_summary = self._format_buffer_summary()
         history_str = self._format_evaluation_history(stability_tolerance)
         stable_materials_str = self._format_known_stable_materials(state)
+        prior_reflections_str = self._format_prior_reflections()
 
         # Create tools
         tools = OrchestratorTools(
@@ -1029,6 +1080,7 @@ class LLMReActOrchestratorAgent(Agent):
                     buffer_summary=buffer_summary,
                     evaluation_history=history_str,
                     known_stable_materials=stable_materials_str,
+                    prior_reflections=prior_reflections_str,
                 )
             history_after = len(getattr(self.lm, "history", []))
             lm_calls = getattr(self.lm, "history", [])[history_before:history_after]
@@ -1233,6 +1285,83 @@ class LLMReActOrchestratorAgent(Agent):
             )
             return "Unable to compute stable materials."
 
+    def _format_prior_reflections(self) -> str:
+        """Format accumulated reflections for injection into the ReAct context."""
+        if not self.enable_reflexion or not self.reflections:
+            return "No prior episode reflections available."
+        lines = []
+        for i, r in enumerate(self.reflections):
+            lines.append(f"Episode {i + 1} reflection:\n{r}")
+        return "\n\n---\n\n".join(lines)
+
+    def generate_reflection(
+        self, episode_metrics: dict[str, Any], stability_tolerance: float
+    ) -> str:
+        """Generate a verbal self-reflection on the completed episode and store it.
+
+        Should be called by the episode runner after each episode completes.
+        The reflection is appended to self.reflections (bounded by max_reflections).
+
+        Args:
+            episode_metrics: Final metrics dict from env.get_latest_metrics().
+            stability_tolerance: e_above_hull threshold used in this episode.
+
+        Returns:
+            The generated reflection string (empty string if reflexion disabled).
+        """
+        if not self.enable_reflexion or self.self_reflection_module is None:
+            return ""
+
+        episode_summary = self._format_evaluation_history(stability_tolerance)
+
+        num_stable = episode_metrics.get("num_novel_stable_discovered", 0)
+        recall = episode_metrics.get("recall", 0.0)
+        num_queries = len(self.evaluation_history)
+        outcome = (
+            f"Novel stable structures found: {num_stable}\n"
+            f"Recall (fraction of known stable phases discovered): {recall:.3f}\n"
+            f"Oracle queries used: {num_queries}"
+        )
+
+        prior = (
+            "\n---\n".join(self.reflections)
+            if self.reflections
+            else "None (this is the first episode)."
+        )
+
+        try:
+            lm = build_dspy_lm(self.llm_config)
+            with dspy.context(lm=lm):
+                pred = self.self_reflection_module(
+                    chemical_system=", ".join(self.chemical_system_elements),
+                    episode_trajectory=episode_summary,
+                    episode_outcome=outcome,
+                    prior_reflections=prior,
+                )
+            reflection = pred.reflection
+            lm_call = lm.history[-1] if getattr(lm, "history", None) else None
+            append_llm_trace(
+                component="self_reflection",
+                llm_config=self.llm_config,
+                output={"reflection": reflection},
+                inputs={
+                    "chemical_system": self.chemical_system_elements,
+                    "episode_outcome": outcome,
+                },
+                extra={"lm_call": lm_call},
+            )
+        except Exception as e:
+            logger.error(f"[Reflexion] Failed to generate reflection: {e}")
+            return ""
+
+        # Sliding window
+        self.reflections.append(reflection)
+        if len(self.reflections) > self.max_reflections:
+            self.reflections = self.reflections[-self.max_reflections :]
+
+        logger.info(f"[Reflexion] Generated reflection: {reflection[:300]}...")
+        return reflection
+
     def update_state(self, state: dict[str, Any]) -> None:
         """Update agent state from environment observation (uses base Agent step tracking)."""
         action = self._update_last_step(state)
@@ -1345,6 +1474,7 @@ class LLMReActOrchestratorAgent(Agent):
             "evaluation_history": serialized_history,
             "chemical_system_elements": self.chemical_system_elements,
             "last_step": self.last_step,
+            "reflections": self.reflections,
         }
 
     def load_state(self, state: dict[str, Any]) -> None:
@@ -1423,3 +1553,6 @@ class LLMReActOrchestratorAgent(Agent):
 
         if "last_step" in state:
             self.last_step = state["last_step"]
+
+        if "reflections" in state:
+            self.reflections = state["reflections"]

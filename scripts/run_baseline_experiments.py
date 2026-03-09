@@ -67,6 +67,7 @@ def run_single_baseline_experiment(
     wandb_project: str = "made-baselines",
     wandb_tags: list[str] | None = None,
     resume: bool = True,
+    enable_reflexion: bool = False,
 ) -> Path:
     """
     Run a single baseline experiment.
@@ -115,6 +116,8 @@ def run_single_baseline_experiment(
         f"++agent.max_stoichiometry={max_stoichiometry}",
         f"++agent.planner.max_stoichiometry={max_stoichiometry}",
         f"environment.max_stoichiometry={max_stoichiometry}",
+        # reflexion
+        f"++agent.enable_reflexion={str(enable_reflexion).lower()}",
     ]
 
     if seed is not None:
@@ -134,6 +137,7 @@ def run_single_baseline_experiment(
         "infra": infra,
         "seed": seed,
         "max_stoichiometry": max_stoichiometry,
+        "enable_reflexion": enable_reflexion,
         "config_overrides": config_overrides,
     }
     with open(output_dir / "experiment_metadata.json", "w") as f:
@@ -250,6 +254,7 @@ def run_multiple_baseline_experiments(
     wandb_tags: list[str] | None = None,
     continue_on_error: bool = True,
     resume: bool = True,
+    enable_reflexion: bool = False,
 ) -> dict[str, Path | None]:
     """
     Run multiple baseline experiments.
@@ -297,6 +302,7 @@ def run_multiple_baseline_experiments(
                 wandb_project=wandb_project,
                 wandb_tags=wandb_tags,
                 resume=resume,
+                enable_reflexion=enable_reflexion,
             )
             results[agent_config] = output_dir
         except Exception as e:
@@ -407,6 +413,16 @@ def main():
         action="store_false",
         help="Do not resume from existing results",
     )
+    parser.add_argument(
+        "--reflexion",
+        action="store_true",
+        default=False,
+        help=(
+            "Enable the Reflexion framework: after each episode the agent generates a "
+            "verbal self-reflection that is injected into subsequent episodes on the same "
+            "chemical system. Only has effect for LLM-based agents that support enable_reflexion."
+        ),
+    )
 
     args = parser.parse_args()
 
@@ -443,6 +459,7 @@ def main():
         wandb_tags=args.wandb_tags,
         continue_on_error=not args.stop_on_error,
         resume=args.resume,
+        enable_reflexion=args.reflexion,
     )
 
     # Print summary
