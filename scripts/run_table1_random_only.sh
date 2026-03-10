@@ -2,7 +2,7 @@
 
 set -euo pipefail
 
-# Run only the LLM Orchestrator row from the Table 1 minimal baseline setup.
+# Run only the Random baseline row from the Table 1 setup.
 # Systems: ternary / quaternary / quinary intermetallic sets.
 #
 # Profiles:
@@ -17,21 +17,15 @@ set -euo pipefail
 # - stability tolerance 0.1 eV
 #
 # Usage:
-#   bash scripts/run_table1_llm_orch_only.sh
+#   bash scripts/run_table1_random_only.sh
 #
 # Useful overrides:
-#   RESUME=1 bash scripts/run_table1_llm_orch_only.sh
-#   INFRA=modal bash scripts/run_table1_llm_orch_only.sh
-#   OUTPUT_DIR=./results/baselines_llm_orch bash scripts/run_table1_llm_orch_only.sh
-#   REFLEXION=1 bash scripts/run_table1_llm_orch_only.sh
-#   RUN_PROFILE=fast bash scripts/run_table1_llm_orch_only.sh
-#   PARALLEL_SYSTEM_RUNS=3 bash scripts/run_table1_llm_orch_only.sh
-#
-# Optional preflight controls:
-#   CHECK_LLM_BACKEND=0                  # skip endpoint check
-#   REQUIRE_API_KEY=0                    # do not require VLLM_API_KEY env var
-#   LLM_BASE_URL=http://127.0.0.1:8000/v1
-#   LLM_HEALTH_PATH=/models
+#   RESUME=1 bash scripts/run_table1_random_only.sh
+#   INFRA=modal bash scripts/run_table1_random_only.sh
+#   OUTPUT_DIR=./results/baselines_random bash scripts/run_table1_random_only.sh
+#   RUN_PROFILE=fast bash scripts/run_table1_random_only.sh
+#   PARALLEL_SYSTEM_RUNS=3 bash scripts/run_table1_random_only.sh
+#   SYSTEM_SCOPE=ternary bash scripts/run_table1_random_only.sh
 
 INFRA="${INFRA:-local}"
 RUN_PROFILE="${RUN_PROFILE:-balanced}"   # fast | balanced | fidelity
@@ -62,7 +56,7 @@ MAX_SYSTEMS="${MAX_SYSTEMS:-$PROFILE_MAX_SYSTEMS}"
 BUDGET="${BUDGET:-$PROFILE_BUDGET}"
 NUM_EPISODES="${NUM_EPISODES:-$PROFILE_NUM_EPISODES}"
 STABILITY_TOLERANCE="${STABILITY_TOLERANCE:-0.1}"
-OUTPUT_DIR="${OUTPUT_DIR:-./results/baselines}"
+OUTPUT_DIR="${OUTPUT_DIR:-./results/baselines_random}"
 
 MAX_STOICHIOMETRY="${MAX_STOICHIOMETRY:-20}"
 PARALLEL_SYSTEM_RUNS="${PARALLEL_SYSTEM_RUNS:-1}"   # 1 = sequential, 2/3 = concurrent
@@ -70,13 +64,6 @@ PARALLEL_SYSTEM_RUNS="${PARALLEL_SYSTEM_RUNS:-1}"   # 1 = sequential, 2/3 = conc
 if ! [[ "${PARALLEL_SYSTEM_RUNS}" =~ ^[0-9]+$ ]] || (( PARALLEL_SYSTEM_RUNS < 1 || PARALLEL_SYSTEM_RUNS > 3 )); then
   echo "ERROR: PARALLEL_SYSTEM_RUNS must be an integer in [1, 3]"
   exit 1
-fi
-
-# REFLEXION=1 -> --reflexion, otherwise omitted (default)
-if [[ "${REFLEXION:-0}" == "1" ]]; then
-  REFLEXION_FLAG="--reflexion"
-else
-  REFLEXION_FLAG=""
 fi
 
 # Fail fast by default if one system run errors.
@@ -92,14 +79,6 @@ if [[ "${RESUME:-0}" == "1" ]]; then
 else
   RESUME_FLAG="--no-resume"
 fi
-
-# LLM backend preflight checks.
-CHECK_LLM_BACKEND="${CHECK_LLM_BACKEND:-1}"
-REQUIRE_API_KEY="${REQUIRE_API_KEY:-1}"
-
-LLM_BASE_URL="${LLM_BASE_URL:-http://127.0.0.1:8004/v1}"
-LLM_HEALTH_PATH="${LLM_HEALTH_PATH:-/models}"
-LLM_CHECK_TIMEOUT="${LLM_CHECK_TIMEOUT:-5}"
 
 # SYSTEM_SCOPE controls which system files to run:
 # - all (default), ternary, quaternary, quinary
@@ -128,53 +107,8 @@ case "${SYSTEM_SCOPE}" in
     ;;
 esac
 
-if [[ "${REQUIRE_API_KEY}" == "1" ]] && [[ -z "${VLLM_API_KEY:-}" ]]; then
-  echo "ERROR: VLLM_API_KEY is not set."
-  echo "Set VLLM_API_KEY before running (or set REQUIRE_API_KEY=0 to bypass)."
-  exit 1
-fi
-
-if [[ "${CHECK_LLM_BACKEND}" == "1" ]]; then
-  if command -v curl >/dev/null 2>&1; then
-    CHECK_URL="${LLM_BASE_URL%/}${LLM_HEALTH_PATH}"
-    echo "Checking LLM backend: ${CHECK_URL}"
-
-    CURL_ARGS=(
-      -sS
-      --max-time "${LLM_CHECK_TIMEOUT}"
-      -o /dev/null
-      -w "%{http_code}"
-    )
-    if [[ -n "${VLLM_API_KEY:-}" ]]; then
-      CURL_ARGS+=(-H "Authorization: Bearer ${VLLM_API_KEY}")
-    fi
-
-    HTTP_CODE="$(curl "${CURL_ARGS[@]}" "${CHECK_URL}" || true)"
-
-    if [[ "${HTTP_CODE}" =~ ^2[0-9][0-9]$ ]]; then
-      :
-    elif [[ "${HTTP_CODE}" == "401" || "${HTTP_CODE}" == "403" ]]; then
-      if [[ -n "${VLLM_API_KEY:-}" ]]; then
-        echo "ERROR: LLM backend reached but auth was rejected (HTTP ${HTTP_CODE})."
-        echo "Check VLLM_API_KEY matches your server --api-key value."
-        exit 1
-      fi
-      echo "WARN: LLM backend reachable (HTTP ${HTTP_CODE}) but auth is required."
-      echo "Set VLLM_API_KEY to your server --api-key value."
-      exit 1
-    else
-      echo "ERROR: LLM backend check failed at ${CHECK_URL} (HTTP ${HTTP_CODE})."
-
-      echo "Start/fix your backend, then rerun (or set CHECK_LLM_BACKEND=0 to bypass)."
-      exit 1
-    fi
-  else
-    echo "WARN: curl not found; skipping LLM backend reachability check."
-  fi
-fi
-
-echo "Running Table 1 LLM Orch only"
-echo "  Agent: llm_react_orchestrator"
+echo "Running Table 1 Random baseline only"
+echo "  Agent: random_generator_baseline"
 echo "  Profile: ${RUN_PROFILE}"
 echo "  Infra: ${INFRA}"
 echo "  Max systems: ${MAX_SYSTEMS}"
@@ -186,7 +120,6 @@ echo "  System scope: ${SYSTEM_SCOPE}"
 echo "  Parallel system runs: ${PARALLEL_SYSTEM_RUNS}"
 echo "  Resume flag: ${RESUME_FLAG}"
 echo "  Stop-on-error: ${STOP_ON_ERROR_FLAG:-off}"
-echo "  Reflexion: ${REFLEXION_FLAG:-off}"
 echo
 
 run_one_system_file() {
@@ -202,7 +135,7 @@ run_one_system_file() {
 
   local cmd=(
     uv run scripts/run_baseline_experiments.py
-    --agent-configs llm_react_orchestrator \
+    --agent-configs random_generator_baseline
     --systems-file "${systems_file}"
     --max-systems "${MAX_SYSTEMS}"
     --budget "${BUDGET}"
@@ -216,9 +149,6 @@ run_one_system_file() {
 
   if [[ -n "${STOP_ON_ERROR_FLAG}" ]]; then
     cmd+=("${STOP_ON_ERROR_FLAG}")
-  fi
-  if [[ -n "${REFLEXION_FLAG}" ]]; then
-    cmd+=("${REFLEXION_FLAG}")
   fi
 
   "${cmd[@]}"
@@ -263,4 +193,4 @@ else
 fi
 
 echo
-echo "Completed LLM Orchestrator-only baseline runs."
+echo "Completed Table 1 Random baseline-only runs."
