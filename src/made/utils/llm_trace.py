@@ -19,22 +19,47 @@ def _cfg_get(cfg: Any, key: str, default: Any = None) -> Any:
     return getattr(cfg, key, default)
 
 
-def _json_safe(value: Any) -> Any:
-    try:
-        json.dumps(value)
+def _json_safe(value: Any, _seen: set[int] | None = None) -> Any:
+    """Recursively convert values to JSON-safe objects.
+
+    This preserves nested dict/list structure where possible and only falls back to
+    string conversion at unsupported leaves.
+    """
+    if _seen is None:
+        _seen = set()
+
+    if value is None or isinstance(value, bool | int | float | str):
         return value
-    except Exception:
-        if hasattr(value, "toDict"):
-            try:
-                return value.toDict()
-            except Exception:
-                pass
-        if hasattr(value, "as_dict"):
-            try:
-                return value.as_dict()
-            except Exception:
-                pass
+    if isinstance(value, Path):
         return str(value)
+
+    obj_id = id(value)
+    if obj_id in _seen:
+        return "<recursive-ref>"
+    _seen.add(obj_id)
+
+    if isinstance(value, dict):
+        return {str(k): _json_safe(v, _seen) for k, v in value.items()}
+    if isinstance(value, list | tuple | set):
+        return [_json_safe(v, _seen) for v in value]
+
+    # Common object->dict serializers.
+    for attr in ("toDict", "as_dict", "model_dump", "dict"):
+        fn = getattr(value, attr, None)
+        if callable(fn):
+            try:
+                return _json_safe(fn(), _seen)
+            except Exception:
+                pass
+
+    # Shallow object fallback.
+    if hasattr(value, "__dict__"):
+        try:
+            return _json_safe(vars(value), _seen)
+        except Exception:
+            pass
+
+    return str(value)
 
 
 def append_llm_trace(
