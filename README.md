@@ -145,6 +145,17 @@ The `--reflexion` flag only affects agents that have `enable_reflexion` in their
 
 Reflexion saves per-system reflection files under `results/.../reflections/<system_id>/reflections.json` and LLM traces for each reflection call under `llm_traces/<system_id>/episode_NNN.jsonl`.
 
+
+### LLM Orchestrator Sweep with Parallelization 
+The `run_table1_llm_orch_only.sh` script runs the needed experiments in parallel. The below specifies to use self-reflection (`REFLEXION=1`) for ternary systems only, specifying a custom number of systems, oracle queries and number of episodes.
+
+```bash
+export MODEL_STR="export MODEL_STR=openai/Qwen/Qwen3.5-122B-A10B-FP8"
+export VLLM_PORT=8000
+export VLLM_API_KEY=local-token 
+CUDA_VISIBLE_DEVICES=7 CHECK_LLM_BACKEND=0 REFLEXION=1 RUN_PROFILE=custom PARALLEL_SYSTEM_RUNS=1 SYSTEM_SCOPE=ternary OUTPUT_DIR=results/baselines/custom/qwen3-30b-instr_reflx/ CUSTOM_MAX_SYSTEMS=2 CUSTOM_BUDGET=50 CUSTOM_NUM_EPISODES=5  bash scripts/run_table1_llm_orch_only.sh 
+```
+
 ## Results Format
 
 ### Single Run (`run_benchmark.py`)
