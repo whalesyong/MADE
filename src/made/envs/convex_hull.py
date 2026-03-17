@@ -349,9 +349,13 @@ class ConvexHullEnvironment(Environment):
     # ---- Accessors ----
     def get_state(self) -> dict[str, Any]:
         """Return the current state of the environment."""
-        last_observation = self.history[-1] if self.history else None
-        if last_observation and isinstance(last_observation["proposal"], Structure):
-            last_observation["proposal"] = last_observation["proposal"].as_dict()
+        last_observation = None
+        if self.history:
+            # Return a copy to avoid mutating `self.history[-1]` in-place.
+            last_observation = dict(self.history[-1])
+            proposal = last_observation.get("proposal")
+            if isinstance(proposal, Structure):
+                last_observation["proposal"] = proposal.as_dict()
         return {
             "query_count": self.query_count,
             "elements": [str(e) for e in self.dataset.elements],

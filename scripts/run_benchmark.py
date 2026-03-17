@@ -403,7 +403,9 @@ def run_episode_local(
                 agent_behavior_metrics = agent.get_latest_behavior_metrics()
                 if agent_behavior_metrics:
                     obs["agent_behavior_metrics"] = agent_behavior_metrics
-            obs["proposal"] = obs["proposal"].as_dict()
+            proposal = obs.get("proposal")
+            if isinstance(proposal, Structure):
+                obs["proposal"] = proposal.as_dict()
             trajectory.append(obs)
             query_count += 1
 
