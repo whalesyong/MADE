@@ -171,7 +171,7 @@ class OrchestratorTools:
         self.state = state
         self._selected_structure: Structure | None = None
         self._selection_reason: str = ""
-        self._telemetry: dict[str, int] = {
+        self._telemetry: dict[str, Any] = {
             "generate_calls": 0,
             "generated_total": 0,
             "generated_added_total": 0,
@@ -179,6 +179,8 @@ class OrchestratorTools:
             "generated_cached_total": 0,
             "generated_static_filtered_total": 0,
             "created_added_total": 0,
+            # Per-query structure additions grouped by reduced composition.
+            "added_by_composition": {},
         }
 
     def generate_structures(
@@ -332,6 +334,8 @@ class OrchestratorTools:
                 self.buffer[comp].append(entry)
                 self.structure_cache[struct_hash] = entry
                 added_count += 1
+                added_by_comp = self._telemetry["added_by_composition"]
+                added_by_comp[comp] = int(added_by_comp.get(comp, 0)) + 1
 
             # Build summary
             total_count = sum(len(entries) for entries in self.buffer.values())
@@ -885,6 +889,8 @@ class OrchestratorTools:
 
             total_count = sum(len(entries) for entries in self.buffer.values())
             self._telemetry["created_added_total"] += 1
+            added_by_comp = self._telemetry["added_by_composition"]
+            added_by_comp[comp] = int(added_by_comp.get(comp, 0)) + 1
             msg = f"Created and added: {full_formula} (reduced: {comp}, {len(structure)} sites). Buffer: {total_count} structures, {len(self.buffer)} compositions. {comp}: {comp_idx + 1} structures."
             logger.info(f"[Tool] {msg}")
             return msg
@@ -896,7 +902,7 @@ class OrchestratorTools:
         """Get the selected structure (internal use)."""
         return self._selected_structure
 
-    def get_telemetry(self) -> dict[str, int]:
+    def get_telemetry(self) -> dict[str, Any]:
         """Get tool telemetry collected during this agent call."""
         return dict(self._telemetry)
 
@@ -1030,6 +1036,20 @@ class LLMReActOrchestratorAgent(Agent):
         self.recent_yield_window = 10
         self._pending_selected_comp: str | None = None
         self._pending_selected_visit_index: int | None = None
+
+        # Per-oracle-query family-exploration tracking.
+        self.query_count = 0
+        self.family_first_seen_query_idx: dict[str, int] = {}
+        self.new_families_cumulative_set: set[str] = set()
+        self.last_new_family_query_idx: int | None = None
+
+        # Latest query-level metrics (updated once per oracle query).
+        self.num_new_families_last_query = 0
+        self.num_new_family_structures_added_last_query = 0
+        self.selected_family_is_new_last_query = 0
+        self.selected_family_age_queries_last_query = -1
+        self.queries_since_last_new_family_last_query = 0
+        self.new_family_generation_share_last_query = 0.0
 
         self.latest_behavior_metrics: dict[str, float] = {}
         self.behavior_metrics_history: list[dict[str, float]] = []
@@ -1191,7 +1211,7 @@ class LLMReActOrchestratorAgent(Agent):
             self.targeted_revisit_total += len(query_targeted) - len(new_targets)
             self.targeted_compositions_seen.update(query_targeted)
 
-    def _update_generation_tracking(self, telemetry: dict[str, int]) -> None:
+    def _update_generation_tracking(self, telemetry: dict[str, Any]) -> None:
         """Accumulate generation/buffer churn telemetry."""
         self.generated_total += telemetry.get("generated_total", 0)
         self.generated_added_total += telemetry.get("generated_added_total", 0)
@@ -1201,6 +1221,77 @@ class LLMReActOrchestratorAgent(Agent):
             "generated_static_filtered_total", 0
         )
         self.created_added_total += telemetry.get("created_added_total", 0)
+
+    def _update_query_family_metrics(
+        self,
+        *,
+        query_idx: int,
+        query_start_buffer_comps: set[str],
+        selected_comp: str,
+        tool_telemetry: dict[str, Any],
+    ) -> None:
+        """Update per-query family-introduction metrics after one oracle selection."""
+        added_by_comp_raw = tool_telemetry.get("added_by_composition", {})
+        added_by_comp = (
+            {
+                str(k): int(v)
+                for k, v in added_by_comp_raw.items()
+                if isinstance(k, str)
+            }
+            if isinstance(added_by_comp_raw, dict)
+            else {}
+        )
+
+        # Ensure families already present at query start have a first-seen timestamp.
+        for comp in query_start_buffer_comps:
+            self.family_first_seen_query_idx.setdefault(comp, query_idx)
+
+        new_families_this_query = {
+            comp for comp in added_by_comp if comp not in query_start_buffer_comps
+        }
+        self.num_new_families_last_query = len(new_families_this_query)
+        self.num_new_family_structures_added_last_query = int(
+            sum(added_by_comp.get(comp, 0) for comp in new_families_this_query)
+        )
+
+        if new_families_this_query:
+            self.new_families_cumulative_set.update(new_families_this_query)
+            self.last_new_family_query_idx = query_idx
+            for comp in new_families_this_query:
+                self.family_first_seen_query_idx.setdefault(comp, query_idx)
+
+        self.selected_family_is_new_last_query = int(
+            selected_comp in new_families_this_query
+        )
+        selected_first_seen = self.family_first_seen_query_idx.get(selected_comp)
+        self.selected_family_age_queries_last_query = (
+            int(query_idx - selected_first_seen)
+            if selected_first_seen is not None
+            else -1
+        )
+
+        if self.num_new_families_last_query > 0:
+            self.queries_since_last_new_family_last_query = 0
+        elif self.last_new_family_query_idx is None:
+            # No introduction yet: number of queries elapsed so far.
+            self.queries_since_last_new_family_last_query = query_idx + 1
+        else:
+            self.queries_since_last_new_family_last_query = (
+                query_idx - self.last_new_family_query_idx
+            )
+
+        total_structures_added_this_query = int(
+            tool_telemetry.get("generated_added_total", 0)
+            + tool_telemetry.get("created_added_total", 0)
+        )
+        self.new_family_generation_share_last_query = (
+            float(
+                self.num_new_family_structures_added_last_query
+                / total_structures_added_this_query
+            )
+            if total_structures_added_this_query > 0
+            else 0.0
+        )
 
     def _record_selected_composition(self, composition: str) -> None:
         """Update selection concentration/switch/streak counters."""
@@ -1395,6 +1486,32 @@ class LLMReActOrchestratorAgent(Agent):
             overflow_novel_stable / overflow_count if overflow_count > 0 else 0.0
         )
 
+        # Step-level family-introduction metrics (updated once per oracle query).
+        # num_new_families: new unique families added this query that were absent at query start.
+        metrics["num_new_families"] = float(self.num_new_families_last_query)
+        # num_new_family_structures_added: structures added for those new families this query.
+        metrics["num_new_family_structures_added"] = float(
+            self.num_new_family_structures_added_last_query
+        )
+        # selected_family_is_new: whether the selected oracle candidate is from this query's new families.
+        metrics["selected_family_is_new"] = float(self.selected_family_is_new_last_query)
+        # selected_family_age_queries: query-age of selected family since first seen in buffer.
+        metrics["selected_family_age_queries"] = float(
+            self.selected_family_age_queries_last_query
+        )
+        # queries_since_last_new_family: number of queries since most recent new-family introduction.
+        metrics["queries_since_last_new_family"] = float(
+            self.queries_since_last_new_family_last_query
+        )
+        # new_families_cumulative: running unique count of introduced families across the episode.
+        metrics["new_families_cumulative"] = float(
+            len(self.new_families_cumulative_set)
+        )
+        # new_family_generation_share: share of this query's added structures belonging to new families.
+        metrics["new_family_generation_share"] = float(
+            self.new_family_generation_share_last_query
+        )
+
         stable_recent, novel_stable_recent, novel_stable_rate_recent = (
             self._get_recent_yield_metrics()
         )
@@ -1421,6 +1538,10 @@ class LLMReActOrchestratorAgent(Agent):
         """
         Propose a structure using the ReAct loop.
         """
+        self.query_count += 1
+        current_query_idx = self.query_count - 1
+        query_start_buffer_comps = set(self.buffer.keys())
+
         self.chemical_system_elements = state.get("elements", [])
         stability_tolerance = state.get("stability_tolerance", 1e-8)
 
@@ -1508,6 +1629,12 @@ class LLMReActOrchestratorAgent(Agent):
                 selected = self._fallback_selection(state)
 
             selected_comp = selected.composition.reduced_composition.alphabetical_formula
+            self._update_query_family_metrics(
+                query_idx=current_query_idx,
+                query_start_buffer_comps=query_start_buffer_comps,
+                selected_comp=selected_comp,
+                tool_telemetry=tool_telemetry,
+            )
             self._record_selected_composition(selected_comp)
             behavior_metrics = self._refresh_behavior_metrics()
 
@@ -1536,9 +1663,16 @@ class LLMReActOrchestratorAgent(Agent):
         except Exception as e:
             logger.error(f"[LLMReActOrchestrator] ReAct failed: {e}")
             selected = self._fallback_selection(state)
-            self._record_selected_composition(
+            selected_comp = (
                 selected.composition.reduced_composition.alphabetical_formula
             )
+            self._update_query_family_metrics(
+                query_idx=current_query_idx,
+                query_start_buffer_comps=query_start_buffer_comps,
+                selected_comp=selected_comp,
+                tool_telemetry={},
+            )
+            self._record_selected_composition(selected_comp)
             self._refresh_behavior_metrics()
             return selected.composition, selected
 
@@ -1923,6 +2057,16 @@ class LLMReActOrchestratorAgent(Agent):
             "revisit_stable_count": self.revisit_stable_count,
             "revisit_novel_stable_count": self.revisit_novel_stable_count,
             "recent_yield_window": self.recent_yield_window,
+            "query_count": self.query_count,
+            "family_first_seen_query_idx": dict(self.family_first_seen_query_idx),
+            "new_families_cumulative_set": sorted(self.new_families_cumulative_set),
+            "last_new_family_query_idx": self.last_new_family_query_idx,
+            "num_new_families_last_query": self.num_new_families_last_query,
+            "num_new_family_structures_added_last_query": self.num_new_family_structures_added_last_query,
+            "selected_family_is_new_last_query": self.selected_family_is_new_last_query,
+            "selected_family_age_queries_last_query": self.selected_family_age_queries_last_query,
+            "queries_since_last_new_family_last_query": self.queries_since_last_new_family_last_query,
+            "new_family_generation_share_last_query": self.new_family_generation_share_last_query,
             "latest_behavior_metrics": dict(self.latest_behavior_metrics),
             "behavior_metrics_history": list(self.behavior_metrics_history),
             "pending_selected_comp": self._pending_selected_comp,
@@ -2114,6 +2258,44 @@ class LLMReActOrchestratorAgent(Agent):
             )
             self.recent_yield_window = int(
                 behavior_tracking.get("recent_yield_window", 10)
+            )
+            self.query_count = int(behavior_tracking.get("query_count", 0))
+            self.family_first_seen_query_idx = {
+                str(k): int(v)
+                for k, v in behavior_tracking.get(
+                    "family_first_seen_query_idx", {}
+                ).items()
+            }
+            self.new_families_cumulative_set = set(
+                behavior_tracking.get("new_families_cumulative_set", [])
+            )
+            last_new_family_query_idx = behavior_tracking.get(
+                "last_new_family_query_idx"
+            )
+            self.last_new_family_query_idx = (
+                int(last_new_family_query_idx)
+                if last_new_family_query_idx is not None
+                else None
+            )
+            self.num_new_families_last_query = int(
+                behavior_tracking.get("num_new_families_last_query", 0)
+            )
+            self.num_new_family_structures_added_last_query = int(
+                behavior_tracking.get(
+                    "num_new_family_structures_added_last_query", 0
+                )
+            )
+            self.selected_family_is_new_last_query = int(
+                behavior_tracking.get("selected_family_is_new_last_query", 0)
+            )
+            self.selected_family_age_queries_last_query = int(
+                behavior_tracking.get("selected_family_age_queries_last_query", -1)
+            )
+            self.queries_since_last_new_family_last_query = int(
+                behavior_tracking.get("queries_since_last_new_family_last_query", 0)
+            )
+            self.new_family_generation_share_last_query = float(
+                behavior_tracking.get("new_family_generation_share_last_query", 0.0)
             )
 
             self.latest_behavior_metrics = {
