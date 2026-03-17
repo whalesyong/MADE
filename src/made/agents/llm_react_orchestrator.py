@@ -19,6 +19,7 @@ Key features:
 import logging
 from typing import Any
 import time, random
+import math
 import dspy
 import numpy as np
 from pymatgen.analysis.phase_diagram import PDEntry, PhaseDiagram
@@ -170,6 +171,15 @@ class OrchestratorTools:
         self.state = state
         self._selected_structure: Structure | None = None
         self._selection_reason: str = ""
+        self._telemetry: dict[str, int] = {
+            "generate_calls": 0,
+            "generated_total": 0,
+            "generated_added_total": 0,
+            "generated_duplicate_total": 0,
+            "generated_cached_total": 0,
+            "generated_static_filtered_total": 0,
+            "created_added_total": 0,
+        }
 
     def generate_structures(
         self,
@@ -198,6 +208,7 @@ class OrchestratorTools:
             return (
                 f"Error: Generator '{generator_name}' not found. Available: {available}"
             )
+        self._telemetry["generate_calls"] += 1
 
         generator = self.generators[generator_name]
 
@@ -263,6 +274,7 @@ class OrchestratorTools:
             
             if not structures:
                 return f"Generator {generator_name} produced no structures."
+            self._telemetry["generated_total"] += len(structures)
 
             # Filter and add to buffer
             added_count = 0
@@ -334,6 +346,12 @@ class OrchestratorTools:
                 msg_parts.append(f"Duplicates: {filtered_out['duplicate']}.")
             if filtered_out["static_filter"]:
                 msg_parts.append(f"Filter failures: {filtered_out['static_filter']}.")
+            self._telemetry["generated_added_total"] += added_count
+            self._telemetry["generated_duplicate_total"] += filtered_out["duplicate"]
+            self._telemetry["generated_cached_total"] += filtered_out["cached"]
+            self._telemetry["generated_static_filtered_total"] += filtered_out[
+                "static_filter"
+            ]
 
             msg = " ".join(msg_parts)
             logger.info(f"[Tool] {msg}")
@@ -866,6 +884,7 @@ class OrchestratorTools:
             self.structure_cache[struct_hash] = entry
 
             total_count = sum(len(entries) for entries in self.buffer.values())
+            self._telemetry["created_added_total"] += 1
             msg = f"Created and added: {full_formula} (reduced: {comp}, {len(structure)} sites). Buffer: {total_count} structures, {len(self.buffer)} compositions. {comp}: {comp_idx + 1} structures."
             logger.info(f"[Tool] {msg}")
             return msg
@@ -876,6 +895,10 @@ class OrchestratorTools:
     def get_selected_structure(self) -> Structure | None:
         """Get the selected structure (internal use)."""
         return self._selected_structure
+
+    def get_telemetry(self) -> dict[str, int]:
+        """Get tool telemetry collected during this agent call."""
+        return dict(self._telemetry)
 
 
 # ============================================================================
@@ -978,6 +1001,38 @@ class LLMReActOrchestratorAgent(Agent):
         self.structure_cache: dict[str, dict[str, Any]] = {}
         self.evaluation_history: list[dict[str, Any]] = []
         self.chemical_system_elements: list[str] = []
+        self.selection_history: list[str] = []
+        self.selection_counts: dict[str, int] = {}
+        self.selection_new_count = 0
+        self.selection_switch_count = 0
+        self.selection_max_streak = 0
+        self.selection_current_streak = 0
+        self.selection_last_comp = ""
+
+        self.targeted_compositions_seen: set[str] = set()
+        self.targeted_new_total = 0
+        self.targeted_revisit_total = 0
+
+        self.element_tool_arg_call_counts: dict[str, int] = {}
+        self.element_tool_arg_total_calls = 0
+
+        self.generated_total = 0
+        self.generated_added_total = 0
+        self.generated_duplicate_total = 0
+        self.generated_cached_total = 0
+        self.generated_static_filtered_total = 0
+        self.created_added_total = 0
+
+        self.revisit_payoff_stats: dict[int, dict[str, int]] = {}
+        self.revisit_total_count = 0
+        self.revisit_stable_count = 0
+        self.revisit_novel_stable_count = 0
+        self.recent_yield_window = 10
+        self._pending_selected_comp: str | None = None
+        self._pending_selected_visit_index: int | None = None
+
+        self.latest_behavior_metrics: dict[str, float] = {}
+        self.behavior_metrics_history: list[dict[str, float]] = []
 
         # Initialize DSPy LM
         self.llm_config = llm_config or {}
@@ -1011,6 +1066,354 @@ class LLMReActOrchestratorAgent(Agent):
         except Exception as e:
             logger.error(f"[LLMReActOrchestrator] Failed to initialize DSPy LM: {e}")
             raise
+
+    def _normalize_composition(self, formula: str) -> str | None:
+        """Normalize composition formula text to reduced formula."""
+        token = formula.strip()
+        if not token:
+            return None
+        try:
+            return Composition(token).reduced_composition.alphabetical_formula
+        except Exception:
+            return None
+
+    def _extract_tool_steps(self, result_output: dict[str, Any]) -> list[dict[str, Any]]:
+        """Extract ordered tool call steps from ReAct output trajectory."""
+        trajectory = result_output.get("trajectory", {})
+        if not isinstance(trajectory, dict):
+            return []
+
+        steps: list[dict[str, Any]] = []
+        for key, value in trajectory.items():
+            if not key.startswith("tool_name_"):
+                continue
+            try:
+                idx = int(key.split("_")[-1])
+            except ValueError:
+                continue
+            args = trajectory.get(f"tool_args_{idx}", {})
+            if not isinstance(args, dict):
+                args = {}
+            steps.append(
+                {
+                    "index": idx,
+                    "tool_name": str(value),
+                    "tool_args": args,
+                }
+            )
+
+        steps.sort(key=lambda x: x["index"])
+        return steps
+
+    def _extract_compositions_from_tool_args(
+        self, tool_name: str, tool_args: dict[str, Any]
+    ) -> set[str]:
+        """Extract referenced compositions from tool arguments."""
+        compositions: set[str] = set()
+
+        comp_val = tool_args.get("composition")
+        if isinstance(comp_val, str) and comp_val.strip():
+            norm = self._normalize_composition(comp_val)
+            if norm:
+                compositions.add(norm)
+
+        if tool_name == "generate_structures":
+            comp_list = tool_args.get("compositions", "")
+            if isinstance(comp_list, str):
+                for token in comp_list.split(","):
+                    norm = self._normalize_composition(token)
+                    if norm:
+                        compositions.add(norm)
+
+        return compositions
+
+    def _extract_elements_from_tool_args(
+        self, tool_name: str, tool_args: dict[str, Any]
+    ) -> set[str]:
+        """Extract referenced elements from tool arguments."""
+        elements: set[str] = set()
+        allowed = set(self.chemical_system_elements)
+
+        for comp in self._extract_compositions_from_tool_args(tool_name, tool_args):
+            try:
+                parsed = Composition(comp)
+                for el in parsed.elements:
+                    symbol = str(el)
+                    if symbol in allowed:
+                        elements.add(symbol)
+            except Exception:
+                continue
+
+        if tool_name == "create_structure":
+            species = tool_args.get("species", "")
+            if isinstance(species, str):
+                for token in species.split(","):
+                    token = token.strip()
+                    if not token:
+                        continue
+                    if token in allowed:
+                        elements.add(token)
+                        continue
+                    try:
+                        parsed = Composition(token)
+                    except Exception:
+                        continue
+                    for el in parsed.elements:
+                        symbol = str(el)
+                        if symbol in allowed:
+                            elements.add(symbol)
+        return elements
+
+    def _update_tool_arg_tracking(self, tool_steps: list[dict[str, Any]]) -> None:
+        """Accumulate tool-argument element/composition exploration counters."""
+        query_targeted: set[str] = set()
+        for step in tool_steps:
+            tool_name = step.get("tool_name", "")
+            tool_args = step.get("tool_args", {})
+            if not isinstance(tool_args, dict):
+                continue
+
+            query_targeted.update(
+                self._extract_compositions_from_tool_args(tool_name, tool_args)
+            )
+
+            call_elements = self._extract_elements_from_tool_args(tool_name, tool_args)
+            if call_elements:
+                self.element_tool_arg_total_calls += 1
+                for element in call_elements:
+                    self.element_tool_arg_call_counts[element] = (
+                        self.element_tool_arg_call_counts.get(element, 0) + 1
+                    )
+
+        if query_targeted:
+            new_targets = [c for c in query_targeted if c not in self.targeted_compositions_seen]
+            self.targeted_new_total += len(new_targets)
+            self.targeted_revisit_total += len(query_targeted) - len(new_targets)
+            self.targeted_compositions_seen.update(query_targeted)
+
+    def _update_generation_tracking(self, telemetry: dict[str, int]) -> None:
+        """Accumulate generation/buffer churn telemetry."""
+        self.generated_total += telemetry.get("generated_total", 0)
+        self.generated_added_total += telemetry.get("generated_added_total", 0)
+        self.generated_duplicate_total += telemetry.get("generated_duplicate_total", 0)
+        self.generated_cached_total += telemetry.get("generated_cached_total", 0)
+        self.generated_static_filtered_total += telemetry.get(
+            "generated_static_filtered_total", 0
+        )
+        self.created_added_total += telemetry.get("created_added_total", 0)
+
+    def _record_selected_composition(self, composition: str) -> None:
+        """Update selection concentration/switch/streak counters."""
+        comp = composition.strip()
+        if not comp:
+            return
+
+        is_new = comp not in self.selection_counts
+        if is_new:
+            self.selection_new_count += 1
+
+        if self.selection_history:
+            if self.selection_history[-1] != comp:
+                self.selection_switch_count += 1
+                self.selection_current_streak = 1
+            else:
+                self.selection_current_streak += 1
+        else:
+            self.selection_current_streak = 1
+
+        self.selection_max_streak = max(
+            self.selection_max_streak, self.selection_current_streak
+        )
+        self.selection_last_comp = comp
+        self.selection_history.append(comp)
+        self.selection_counts[comp] = self.selection_counts.get(comp, 0) + 1
+
+        self._pending_selected_comp = comp
+        self._pending_selected_visit_index = self.selection_counts[comp]
+
+    def _update_revisit_payoff(self, composition: str, is_stable: bool, is_novel: bool) -> None:
+        """Update revisit payoff statistics after an oracle result is observed."""
+        visit_idx = self._pending_selected_visit_index
+        if visit_idx is None or self._pending_selected_comp != composition:
+            visit_idx = self.selection_counts.get(composition, 0)
+            if visit_idx <= 0:
+                visit_idx = 1
+
+        bucket = self.revisit_payoff_stats.setdefault(
+            visit_idx, {"count": 0, "stable": 0, "novel_stable": 0}
+        )
+        bucket["count"] += 1
+        if is_stable:
+            bucket["stable"] += 1
+        if is_stable and is_novel:
+            bucket["novel_stable"] += 1
+
+        if visit_idx > 1:
+            self.revisit_total_count += 1
+            if is_stable:
+                self.revisit_stable_count += 1
+            if is_stable and is_novel:
+                self.revisit_novel_stable_count += 1
+
+        self._pending_selected_comp = None
+        self._pending_selected_visit_index = None
+
+    def _get_recent_yield_metrics(self) -> tuple[float, float, float]:
+        """Return recent stable and novel-stable yields over the rolling window."""
+        if not self.evaluation_history:
+            return 0.0, 0.0, 0.0
+
+        window_entries = self.evaluation_history[-self.recent_yield_window :]
+        if not window_entries:
+            return 0.0, 0.0, 0.0
+
+        stable_recent = sum(1 for entry in window_entries if entry.get("is_stable", False))
+        novel_stable_recent = sum(
+            1
+            for entry in window_entries
+            if entry.get("is_stable", False) and entry.get("is_newly_discovered", False)
+        )
+        denom = float(len(window_entries))
+        return (
+            float(stable_recent),
+            float(novel_stable_recent),
+            float(novel_stable_recent / denom if denom > 0 else 0.0),
+        )
+
+    def _build_behavior_metrics(self) -> dict[str, float]:
+        """Build a flat dict of agent behavior metrics for live logging."""
+        metrics: dict[str, float] = {}
+        total_selected = len(self.selection_history)
+        unique_selected = len(self.selection_counts)
+
+        metrics["selection_total"] = float(total_selected)
+        metrics["selection_unique_count"] = float(unique_selected)
+        metrics["selection_new_composition_count"] = float(self.selection_new_count)
+        metrics["selection_new_composition_rate"] = float(
+            self.selection_new_count / total_selected if total_selected > 0 else 0.0
+        )
+
+        if total_selected > 0:
+            top_count = max(self.selection_counts.values())
+            probs = [count / total_selected for count in self.selection_counts.values()]
+            entropy = -sum(p * math.log(p) for p in probs if p > 0)
+            max_entropy = math.log(len(probs)) if len(probs) > 1 else 0.0
+            entropy_norm = entropy / max_entropy if max_entropy > 0 else 0.0
+            metrics["selection_top1_share"] = float(top_count / total_selected)
+            metrics["selection_entropy"] = float(entropy)
+            metrics["selection_entropy_normalized"] = float(entropy_norm)
+        else:
+            metrics["selection_top1_share"] = 0.0
+            metrics["selection_entropy"] = 0.0
+            metrics["selection_entropy_normalized"] = 0.0
+
+        transitions_denom = total_selected - 1
+        metrics["selection_switch_rate"] = float(
+            self.selection_switch_count / transitions_denom
+            if transitions_denom > 0
+            else 0.0
+        )
+        metrics["selection_max_same_composition_streak"] = float(
+            self.selection_max_streak
+        )
+
+        metrics["targeted_unique_count"] = float(len(self.targeted_compositions_seen))
+        metrics["targeted_new_total"] = float(self.targeted_new_total)
+        metrics["targeted_revisit_total"] = float(self.targeted_revisit_total)
+        metrics["explore_vs_exploit_ratio"] = float(
+            self.targeted_new_total / self.targeted_revisit_total
+            if self.targeted_revisit_total > 0
+            else float(self.targeted_new_total)
+        )
+
+        metrics["tool_arg_element_calls_total"] = float(self.element_tool_arg_total_calls)
+        for element in sorted(self.chemical_system_elements):
+            count = float(self.element_tool_arg_call_counts.get(element, 0))
+            ratio = (
+                count / self.element_tool_arg_total_calls
+                if self.element_tool_arg_total_calls > 0
+                else 0.0
+            )
+            metrics[f"element_arg_count_{element}"] = count
+            metrics[f"element_arg_presence_ratio_{element}"] = float(ratio)
+
+        metrics["buffer_churn_generated_total"] = float(self.generated_total)
+        metrics["buffer_churn_added_total"] = float(self.generated_added_total)
+        metrics["buffer_churn_duplicate_total"] = float(self.generated_duplicate_total)
+        metrics["buffer_churn_cached_total"] = float(self.generated_cached_total)
+        metrics["buffer_churn_static_filtered_total"] = float(
+            self.generated_static_filtered_total
+        )
+        metrics["buffer_churn_created_added_total"] = float(self.created_added_total)
+        metrics["buffer_churn_addition_rate"] = float(
+            self.generated_added_total / self.generated_total
+            if self.generated_total > 0
+            else 0.0
+        )
+        metrics["buffer_churn_duplicate_rejection_rate"] = float(
+            (self.generated_duplicate_total + self.generated_cached_total)
+            / self.generated_total
+            if self.generated_total > 0
+            else 0.0
+        )
+
+        metrics["revisit_payoff_revisit_count"] = float(self.revisit_total_count)
+        metrics["revisit_payoff_revisit_stable_rate"] = float(
+            self.revisit_stable_count / self.revisit_total_count
+            if self.revisit_total_count > 0
+            else 0.0
+        )
+        metrics["revisit_payoff_revisit_novel_stable_rate"] = float(
+            self.revisit_novel_stable_count / self.revisit_total_count
+            if self.revisit_total_count > 0
+            else 0.0
+        )
+
+        overflow_count = 0
+        overflow_stable = 0
+        overflow_novel_stable = 0
+        for visit_idx, stats in sorted(self.revisit_payoff_stats.items()):
+            if visit_idx <= 5:
+                count = stats["count"]
+                metrics[f"revisit_payoff_visit{visit_idx}_count"] = float(count)
+                metrics[f"revisit_payoff_visit{visit_idx}_stable_rate"] = float(
+                    stats["stable"] / count if count > 0 else 0.0
+                )
+                metrics[f"revisit_payoff_visit{visit_idx}_novel_stable_rate"] = float(
+                    stats["novel_stable"] / count if count > 0 else 0.0
+                )
+            else:
+                overflow_count += stats["count"]
+                overflow_stable += stats["stable"]
+                overflow_novel_stable += stats["novel_stable"]
+
+        metrics["revisit_payoff_visit_gt5_count"] = float(overflow_count)
+        metrics["revisit_payoff_visit_gt5_stable_rate"] = float(
+            overflow_stable / overflow_count if overflow_count > 0 else 0.0
+        )
+        metrics["revisit_payoff_visit_gt5_novel_stable_rate"] = float(
+            overflow_novel_stable / overflow_count if overflow_count > 0 else 0.0
+        )
+
+        stable_recent, novel_stable_recent, novel_stable_rate_recent = (
+            self._get_recent_yield_metrics()
+        )
+        metrics[f"recent_yield_stable_last{self.recent_yield_window}"] = stable_recent
+        metrics[f"recent_yield_novel_stable_last{self.recent_yield_window}"] = (
+            novel_stable_recent
+        )
+        metrics[f"recent_yield_novel_stable_rate_last{self.recent_yield_window}"] = (
+            novel_stable_rate_recent
+        )
+
+        return metrics
+
+    def _refresh_behavior_metrics(self) -> dict[str, float]:
+        """Refresh latest metrics snapshot and append to metric history."""
+        metrics = self._build_behavior_metrics()
+        self.latest_behavior_metrics = metrics
+        self.behavior_metrics_history.append(dict(metrics))
+        return metrics
 
     def propose_composition_and_structure(
         self, state: dict[str, Any]
@@ -1086,10 +1489,32 @@ class LLMReActOrchestratorAgent(Agent):
             lm_calls = getattr(self.lm, "history", [])[history_before:history_after]
 
             logger.info(f"[LLMReActOrchestrator] Result: {result.answer}")
+            result_output = getattr(
+                result,
+                "toDict",
+                lambda: {"answer": getattr(result, "answer", str(result))},
+            )()
+            tool_steps = self._extract_tool_steps(result_output)
+            self._update_tool_arg_tracking(tool_steps)
+            tool_telemetry = tools.get_telemetry()
+            self._update_generation_tracking(tool_telemetry)
+
+            selected = tools.get_selected_structure()
+
+            if selected is None:
+                logger.warning(
+                    "[LLMReActOrchestrator] No structure selected. Falling back."
+                )
+                selected = self._fallback_selection(state)
+
+            selected_comp = selected.composition.reduced_composition.alphabetical_formula
+            self._record_selected_composition(selected_comp)
+            behavior_metrics = self._refresh_behavior_metrics()
+
             append_llm_trace(
                 component="orchestrator",
                 llm_config=self.llm_config,
-                output=getattr(result, "toDict", lambda: {"answer": getattr(result, "answer", str(result))})(),
+                output=result_output,
                 inputs={
                     "chemical_system": self.chemical_system_elements,
                     "max_stoichiometry": self.max_stoichiometry,
@@ -1101,22 +1526,20 @@ class LLMReActOrchestratorAgent(Agent):
                     "evaluation_history_len": len(self.evaluation_history),
                     "num_lm_calls": len(lm_calls),
                     "lm_calls": lm_calls,
+                    "tool_telemetry": tool_telemetry,
+                    "behavior_metrics": behavior_metrics,
                 },
             )
-
-            selected = tools.get_selected_structure()
-
-            if selected is None:
-                logger.warning(
-                    "[LLMReActOrchestrator] No structure selected. Falling back."
-                )
-                selected = self._fallback_selection(state)
 
             return selected.composition, selected
 
         except Exception as e:
             logger.error(f"[LLMReActOrchestrator] ReAct failed: {e}")
             selected = self._fallback_selection(state)
+            self._record_selected_composition(
+                selected.composition.reduced_composition.alphabetical_formula
+            )
+            self._refresh_behavior_metrics()
             return selected.composition, selected
 
     def _fallback_selection(self, state: dict[str, Any]) -> Structure:
@@ -1435,6 +1858,12 @@ class LLMReActOrchestratorAgent(Agent):
         logger.info(
             f"[LLMReActOrchestrator] Recorded: {history_entry['composition']} [{status}, e={e_hull:.4f}]"
         )
+        self._update_revisit_payoff(
+            composition=history_entry["composition"],
+            is_stable=bool(history_entry["is_stable"]),
+            is_novel=bool(history_entry["is_newly_discovered"]),
+        )
+        self._refresh_behavior_metrics()
 
     def get_state(self) -> dict[str, Any]:
         """Get agent state for checkpointing."""
@@ -1468,6 +1897,38 @@ class LLMReActOrchestratorAgent(Agent):
                 serialized_entry["structure_dict"] = entry["structure"].as_dict()
             serialized_history.append(serialized_entry)
 
+        behavior_tracking = {
+            "selection_history": list(self.selection_history),
+            "selection_counts": dict(self.selection_counts),
+            "selection_new_count": self.selection_new_count,
+            "selection_switch_count": self.selection_switch_count,
+            "selection_max_streak": self.selection_max_streak,
+            "selection_current_streak": self.selection_current_streak,
+            "selection_last_comp": self.selection_last_comp,
+            "targeted_compositions_seen": sorted(self.targeted_compositions_seen),
+            "targeted_new_total": self.targeted_new_total,
+            "targeted_revisit_total": self.targeted_revisit_total,
+            "element_tool_arg_call_counts": dict(self.element_tool_arg_call_counts),
+            "element_tool_arg_total_calls": self.element_tool_arg_total_calls,
+            "generated_total": self.generated_total,
+            "generated_added_total": self.generated_added_total,
+            "generated_duplicate_total": self.generated_duplicate_total,
+            "generated_cached_total": self.generated_cached_total,
+            "generated_static_filtered_total": self.generated_static_filtered_total,
+            "created_added_total": self.created_added_total,
+            "revisit_payoff_stats": {
+                str(k): dict(v) for k, v in self.revisit_payoff_stats.items()
+            },
+            "revisit_total_count": self.revisit_total_count,
+            "revisit_stable_count": self.revisit_stable_count,
+            "revisit_novel_stable_count": self.revisit_novel_stable_count,
+            "recent_yield_window": self.recent_yield_window,
+            "latest_behavior_metrics": dict(self.latest_behavior_metrics),
+            "behavior_metrics_history": list(self.behavior_metrics_history),
+            "pending_selected_comp": self._pending_selected_comp,
+            "pending_selected_visit_index": self._pending_selected_visit_index,
+        }
+
         return {
             "buffer": buffer_dict,
             "structure_cache_hashes": list(self.structure_cache.keys()),
@@ -1475,7 +1936,18 @@ class LLMReActOrchestratorAgent(Agent):
             "chemical_system_elements": self.chemical_system_elements,
             "last_step": self.last_step,
             "reflections": self.reflections,
+            "behavior_tracking": behavior_tracking,
         }
+
+    def get_latest_behavior_metrics(self) -> dict[str, float]:
+        """Return latest behavior metrics snapshot."""
+        if not self.latest_behavior_metrics:
+            return self._refresh_behavior_metrics()
+        return dict(self.latest_behavior_metrics)
+
+    def get_behavior_metrics_history(self) -> list[dict[str, float]]:
+        """Return behavior metrics history snapshots."""
+        return [dict(x) for x in self.behavior_metrics_history]
 
     def load_state(self, state: dict[str, Any]) -> None:
         """Load agent state from checkpoint."""
@@ -1556,3 +2028,114 @@ class LLMReActOrchestratorAgent(Agent):
 
         if "reflections" in state:
             self.reflections = state["reflections"]
+
+        behavior_tracking = state.get("behavior_tracking")
+        if isinstance(behavior_tracking, dict):
+            self.selection_history = [
+                str(x) for x in behavior_tracking.get("selection_history", [])
+            ]
+            self.selection_counts = {
+                str(k): int(v)
+                for k, v in behavior_tracking.get("selection_counts", {}).items()
+            }
+            self.selection_new_count = int(
+                behavior_tracking.get("selection_new_count", 0)
+            )
+            self.selection_switch_count = int(
+                behavior_tracking.get("selection_switch_count", 0)
+            )
+            self.selection_max_streak = int(
+                behavior_tracking.get("selection_max_streak", 0)
+            )
+            self.selection_current_streak = int(
+                behavior_tracking.get("selection_current_streak", 0)
+            )
+            self.selection_last_comp = str(
+                behavior_tracking.get("selection_last_comp", "")
+            )
+
+            self.targeted_compositions_seen = set(
+                behavior_tracking.get("targeted_compositions_seen", [])
+            )
+            self.targeted_new_total = int(behavior_tracking.get("targeted_new_total", 0))
+            self.targeted_revisit_total = int(
+                behavior_tracking.get("targeted_revisit_total", 0)
+            )
+
+            self.element_tool_arg_call_counts = {
+                str(k): int(v)
+                for k, v in behavior_tracking.get(
+                    "element_tool_arg_call_counts", {}
+                ).items()
+            }
+            self.element_tool_arg_total_calls = int(
+                behavior_tracking.get("element_tool_arg_total_calls", 0)
+            )
+
+            self.generated_total = int(behavior_tracking.get("generated_total", 0))
+            self.generated_added_total = int(
+                behavior_tracking.get("generated_added_total", 0)
+            )
+            self.generated_duplicate_total = int(
+                behavior_tracking.get("generated_duplicate_total", 0)
+            )
+            self.generated_cached_total = int(
+                behavior_tracking.get("generated_cached_total", 0)
+            )
+            self.generated_static_filtered_total = int(
+                behavior_tracking.get("generated_static_filtered_total", 0)
+            )
+            self.created_added_total = int(
+                behavior_tracking.get("created_added_total", 0)
+            )
+
+            raw_revisit = behavior_tracking.get("revisit_payoff_stats", {})
+            if isinstance(raw_revisit, dict):
+                self.revisit_payoff_stats = {}
+                for k, v in raw_revisit.items():
+                    try:
+                        visit_idx = int(k)
+                    except Exception:
+                        continue
+                    if isinstance(v, dict):
+                        self.revisit_payoff_stats[visit_idx] = {
+                            "count": int(v.get("count", 0)),
+                            "stable": int(v.get("stable", 0)),
+                            "novel_stable": int(v.get("novel_stable", 0)),
+                        }
+            self.revisit_total_count = int(
+                behavior_tracking.get("revisit_total_count", 0)
+            )
+            self.revisit_stable_count = int(
+                behavior_tracking.get("revisit_stable_count", 0)
+            )
+            self.revisit_novel_stable_count = int(
+                behavior_tracking.get("revisit_novel_stable_count", 0)
+            )
+            self.recent_yield_window = int(
+                behavior_tracking.get("recent_yield_window", 10)
+            )
+
+            self.latest_behavior_metrics = {
+                str(k): float(v)
+                for k, v in behavior_tracking.get("latest_behavior_metrics", {}).items()
+            }
+            history = behavior_tracking.get("behavior_metrics_history", [])
+            self.behavior_metrics_history = []
+            if isinstance(history, list):
+                for row in history:
+                    if isinstance(row, dict):
+                        clean = {}
+                        for k, v in row.items():
+                            try:
+                                clean[str(k)] = float(v)
+                            except Exception:
+                                continue
+                        if clean:
+                            self.behavior_metrics_history.append(clean)
+
+            self._pending_selected_comp = behavior_tracking.get("pending_selected_comp")
+            pending_idx = behavior_tracking.get("pending_selected_visit_index")
+            self._pending_selected_visit_index = (
+                int(pending_idx) if pending_idx is not None else None
+            )

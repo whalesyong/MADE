@@ -395,6 +395,14 @@ def run_episode_local(
             state = env.get_state()
             _, struct = agent(state)
             obs, _ = env.step(struct)
+            agent_behavior_metrics = {}
+            if hasattr(agent, "get_latest_behavior_metrics"):
+                # Consume latest oracle observation immediately so behavior metrics
+                # are up to date for this query's live logs/checkpoints.
+                agent.update_state(env.get_state())
+                agent_behavior_metrics = agent.get_latest_behavior_metrics()
+                if agent_behavior_metrics:
+                    obs["agent_behavior_metrics"] = agent_behavior_metrics
             obs["proposal"] = obs["proposal"].as_dict()
             trajectory.append(obs)
             query_count += 1
@@ -421,6 +429,10 @@ def run_episode_local(
                 logger.info(
                     f"Metrics: {json.dumps(env.get_latest_metrics(), indent=2)}"
                 )
+                if agent_behavior_metrics:
+                    logger.info(
+                        f"Agent behavior metrics: {json.dumps(agent_behavior_metrics, indent=2)}"
+                    )
 
             # Log step-level metrics to wandb
             if config.logger.get("use_wandb", False):
@@ -437,6 +449,11 @@ def run_episode_local(
                         step_metrics[f"overall/{k}"] = float(v)
                     elif isinstance(v, bool):
                         step_metrics[f"overall/{k}"] = int(v)
+                for k, v in agent_behavior_metrics.items():
+                    if isinstance(v, (int, float)):
+                        step_metrics[f"agent/{k}"] = float(v)
+                    elif isinstance(v, bool):
+                        step_metrics[f"agent/{k}"] = int(v)
                 wandb.log(step_metrics)
                 wandb.save(tmp_trajectory_file, policy="live")
     except KeyboardInterrupt:
