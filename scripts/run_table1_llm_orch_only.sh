@@ -34,7 +34,7 @@ set -euo pipefail
 #   LLM_HEALTH_PATH=/models
 
 INFRA="${INFRA:-local}"
-RUN_PROFILE="${RUN_PROFILE:-balanced}"   # fast | balanced | fidelity
+RUN_PROFILE="${RUN_PROFILE:-balanced}"   # fast | balanced | fidelity | custom
 
 case "${RUN_PROFILE}" in
   fast)
@@ -52,8 +52,13 @@ case "${RUN_PROFILE}" in
     PROFILE_BUDGET=50
     PROFILE_NUM_EPISODES=5
     ;;
+  custom)
+    PROFILE_MAX_SYSTEMS="${CUSTOM_MAX_SYSTEMS:?ERROR: CUSTOM_MAX_SYSTEMS must be set when RUN_PROFILE=custom}"
+    PROFILE_BUDGET="${CUSTOM_BUDGET:?ERROR: CUSTOM_BUDGET must be set when RUN_PROFILE=custom}"
+    PROFILE_NUM_EPISODES="${CUSTOM_NUM_EPISODES:?ERROR: CUSTOM_NUM_EPISODES must be set when RUN_PROFILE=custom}"
+    ;;
   *)
-    echo "ERROR: RUN_PROFILE must be one of: fast, balanced, fidelity"
+    echo "ERROR: RUN_PROFILE must be one of: fast, balanced, fidelity, custom"
     exit 1
     ;;
 esac

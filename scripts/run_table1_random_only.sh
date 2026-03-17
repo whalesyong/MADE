@@ -85,7 +85,7 @@ fi
 SYSTEM_SCOPE="${SYSTEM_SCOPE:-all}"
 
 SYSTEM_FILES=(
-  "./data/systems_10_mp_20/systems_ternary_n10_maxatoms20_intermetallic_smact.json"
+  #"./data/systems_10_mp_20/systems_ternary_n10_maxatoms20_intermetallic_smact.json"
   "./data/systems_10_mp_20/systems_quaternary_n10_maxatoms20_intermetallic_smact.json"
   "./data/systems_10_mp_20/systems_quinary_n10_maxatoms20_intermetallic_smact.json"
 )
