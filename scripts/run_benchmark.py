@@ -361,7 +361,32 @@ def run_episode_local(
             logger.info(
                 f"[Reflexion] Loaded {len(prior_reflections)} prior reflection(s) for episode {episode_id}"
             )
+    
+    # Initial family prompt injection: on episode 0, inject a guidance message
+    # telling the agent to focus on specific (hard/easy) composition families.
+    initial_family_mode = OmegaConf.select(config, "experiment.initial_family_mode", default=None)
+    if initial_family_mode and episode_id == 0 and hasattr(agent, "reflections"):
+        initial_family_file = OmegaConf.select(
+            config, "experiment.initial_family_file",
+            default="./data/initial_family_prompts.json",
+        )
+        family_data = json.loads(Path(initial_family_file).read_text())
+        families = family_data.get(system_id, {}).get(initial_family_mode)
+        if families:
+            guidance = (
+                f"IMPORTANT INITIAL GUIDANCE: In this episode, focus your exploration on "
+                f"the following {initial_family_mode} composition families: "
+                f"{', '.join(families)}. "
+                f"Prioritize generating and evaluating structures for these compositions."
+            )
+            agent.reflections.append(guidance)
+            logger.info(
+                f"[InitialFamily] Injected {initial_family_mode} family guidance for {system_id} "
+                f"({len(families)} compositions)"
+            )
 
+
+    
     results = {
         "metrics": {},
         "trajectory": [],

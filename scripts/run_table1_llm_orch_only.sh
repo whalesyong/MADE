@@ -24,6 +24,8 @@ set -euo pipefail
 #   INFRA=modal bash scripts/run_table1_llm_orch_only.sh
 #   OUTPUT_DIR=./results/baselines_llm_orch bash scripts/run_table1_llm_orch_only.sh
 #   REFLEXION=1 bash scripts/run_table1_llm_orch_only.sh
+#   INITIAL_FAMILY_MODE=hard bash scripts/run_table1_llm_orch_only.sh
+#   INITIAL_FAMILY_MODE=easy bash scripts/run_table1_llm_orch_only.sh
 #   RUN_PROFILE=fast bash scripts/run_table1_llm_orch_only.sh
 #   PARALLEL_SYSTEM_RUNS=3 bash scripts/run_table1_llm_orch_only.sh
 #
@@ -82,6 +84,17 @@ if [[ "${REFLEXION:-0}" == "1" ]]; then
   REFLEXION_FLAG="--reflexion"
 else
   REFLEXION_FLAG=""
+fi
+
+# INITIAL_FAMILY_MODE=hard|easy -> --initial-family-mode hard|easy
+INITIAL_FAMILY_MODE="${INITIAL_FAMILY_MODE:-}"
+INITIAL_FAMILY_FLAGS=""
+if [[ -n "${INITIAL_FAMILY_MODE}" ]]; then
+  if [[ "${INITIAL_FAMILY_MODE}" != "hard" && "${INITIAL_FAMILY_MODE}" != "easy" ]]; then
+    echo "ERROR: INITIAL_FAMILY_MODE must be 'hard' or 'easy'"
+    exit 1
+  fi
+  INITIAL_FAMILY_FLAGS="--initial-family-mode ${INITIAL_FAMILY_MODE}"
 fi
 
 # Fail fast by default if one system run errors.
@@ -192,6 +205,7 @@ echo "  Parallel system runs: ${PARALLEL_SYSTEM_RUNS}"
 echo "  Resume flag: ${RESUME_FLAG}"
 echo "  Stop-on-error: ${STOP_ON_ERROR_FLAG:-off}"
 echo "  Reflexion: ${REFLEXION_FLAG:-off}"
+echo "  Initial family mode: ${INITIAL_FAMILY_MODE:-off}"
 echo
 
 run_one_system_file() {
@@ -224,6 +238,9 @@ run_one_system_file() {
   fi
   if [[ -n "${REFLEXION_FLAG}" ]]; then
     cmd+=("${REFLEXION_FLAG}")
+  fi
+  if [[ -n "${INITIAL_FAMILY_FLAGS}" ]]; then
+    cmd+=(${INITIAL_FAMILY_FLAGS})
   fi
 
   "${cmd[@]}"

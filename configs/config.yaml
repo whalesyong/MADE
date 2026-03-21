@@ -22,6 +22,10 @@ experiment:
   systems_file: null
   # If set, limit the number of systems loaded from systems_file/systems
   max_systems: 5
+  # Initial family prompt injection for episode 0
+  # Set to "hard" or "easy" to inject composition guidance; null = disabled
+  initial_family_mode: null
+  initial_family_file: ./data/initial_family_prompts.json
 
 hydra:
   run:

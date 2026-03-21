@@ -68,6 +68,8 @@ def run_single_baseline_experiment(
     wandb_tags: list[str] | None = None,
     resume: bool = True,
     enable_reflexion: bool = False,
+    initial_family_mode: str | None = None,
+    initial_family_file: str = "./data/initial_family_prompts.json",
 ) -> Path:
     """
     Run a single baseline experiment.
@@ -84,6 +86,8 @@ def run_single_baseline_experiment(
         use_wandb: Whether to use wandb logging
         wandb_project: Wandb project name
         wandb_tags: List of wandb tags
+        initial_family_mode: "hard" or "easy" to inject composition guidance in ep 0
+        initial_family_file: Path to JSON with hard/easy families per system
 
     Returns:
         Path to output directory
@@ -120,6 +124,10 @@ def run_single_baseline_experiment(
         f"++agent.enable_reflexion={str(enable_reflexion).lower()}",
     ]
 
+    if initial_family_mode:
+        config_overrides.append(f"experiment.initial_family_mode={initial_family_mode}")
+        config_overrides.append(f"experiment.initial_family_file={initial_family_file}")
+
     if seed is not None:
         config_overrides.append(f"experiment.seed={seed}")
 
@@ -138,6 +146,8 @@ def run_single_baseline_experiment(
         "seed": seed,
         "max_stoichiometry": max_stoichiometry,
         "enable_reflexion": enable_reflexion,
+        "initial_family_mode": initial_family_mode,
+        "initial_family_file": initial_family_file,
         "config_overrides": config_overrides,
     }
     with open(output_dir / "experiment_metadata.json", "w") as f:
@@ -255,6 +265,8 @@ def run_multiple_baseline_experiments(
     continue_on_error: bool = True,
     resume: bool = True,
     enable_reflexion: bool = False,
+    initial_family_mode: str | None = None,
+    initial_family_file: str = "./data/initial_family_prompts.json",
 ) -> dict[str, Path | None]:
     """
     Run multiple baseline experiments.
@@ -303,6 +315,8 @@ def run_multiple_baseline_experiments(
                 wandb_tags=wandb_tags,
                 resume=resume,
                 enable_reflexion=enable_reflexion,
+                initial_family_mode=initial_family_mode,
+                initial_family_file=initial_family_file,
             )
             results[agent_config] = output_dir
         except Exception as e:
@@ -423,6 +437,22 @@ def main():
             "chemical system. Only has effect for LLM-based agents that support enable_reflexion."
         ),
     )
+    parser.add_argument(
+        "--initial-family-mode",
+        type=str,
+        default=None,
+        choices=["hard", "easy"],
+        help=(
+            "Inject composition guidance into episode 0. 'hard' = never-stable families, "
+            "'easy' = frequently-stable families. Reads from --initial-family-file."
+        ),
+    )
+    parser.add_argument(
+        "--initial-family-file",
+        type=str,
+        default="./data/initial_family_prompts.json",
+        help="Path to JSON file with hard/easy families per system (default: ./data/initial_family_prompts.json)",
+    )
 
     args = parser.parse_args()
 
@@ -460,6 +490,8 @@ def main():
         continue_on_error=not args.stop_on_error,
         resume=args.resume,
         enable_reflexion=args.reflexion,
+        initial_family_mode=args.initial_family_mode,
+        initial_family_file=args.initial_family_file,
     )
 
     # Print summary

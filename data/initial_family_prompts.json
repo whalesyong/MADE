@@ -1,0 +1,70 @@
+{
+  "Mg-Sn-Sr": {
+    "hard": [
+      "Mg4Sn1Sr3",
+      "Mg1Sn1Sr3",
+      "Mg4Sn1Sr1",
+      "Mg2Sn1Sr1",
+      "Mg5Sn1Sr1",
+      "Mg2Sn1Sr2",
+      "Mg4Sn1Sr2",
+      "Mg3Sn1Sr3",
+      "Mg2Sn3Sr3",
+      "Sn3Sr4",
+      "Mg1Sn2Sr4",
+      "Sn1Sr3",
+      "Mg2Sn1Sr3",
+      "Sn1Sr5",
+      "Mg3Sn2Sr2",
+      "Mg3Sn1Sr2"
+    ],
+    "easy": [
+      "Mg1Sn1",
+      "Mg1Sn2",
+      "Mg1Sn2Sr2",
+      "Mg1Sn3Sr2",
+      "Mg1Sn5Sr1",
+      "Mg2Sn1",
+      "Mg2Sn2Sr1",
+      "Mg2Sn3Sr1",
+      "Mg2Sr1",
+      "Sn1Sr2",
+      "Sn3Sr1",
+      "Mg3Sn2Sr1",
+      "Mg3Sn1Sr1"
+    ]
+  },
+  "Au-K-Tb": {
+    "hard": [
+      "Au5K1",
+      "Au1K1Tb2",
+      "Au1K1Tb1",
+      "Au2K1Tb1",
+      "Au2K3Tb1",
+      "Au1K2Tb1",
+      "Au1K2Tb2",
+      "Au1K3Tb1",
+      "Au1K1Tb3",
+      "Au3K2",
+      "Au3K3Tb1",
+      "Au5K1Tb1",
+      "Au5K2Tb1",
+      "Au7Tb1",
+      "Au5Tb4",
+      "Au4Tb3",
+      "Au3K1Tb1"
+    ],
+    "easy": [
+      "Au10Tb7",
+      "Au3K1Tb2",
+      "Au5Tb1",
+      "Au5Tb2",
+      "Au1Tb3",
+      "Au5Tb3",
+      "Au3Tb2",
+      "Au2Tb1",
+      "Au4Tb1",
+      "Au3Tb1"
+    ]
+  }
+}
