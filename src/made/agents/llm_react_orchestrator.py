@@ -2011,11 +2011,9 @@ class LLMReActOrchestratorAgent(Agent):
 
             # parsing logic here to strip the </think> part, so that DSPy parses cleanly
             
-            if "</think>" in reflection: 
-                reasoning_part = raw_reflection.split('</think>')[0]
-                reflection = raw_reflection.split('</think>')[1]
-
-            else: 
+            if "</think>" in raw_reflection:
+                reflection = raw_reflection.split("</think>", 1)[1]
+            else:
                 reflection = raw_reflection
             
             lm_call = lm.history[-1] if getattr(lm, "history", None) else None
