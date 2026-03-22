@@ -17,6 +17,7 @@ Key features:
 """
 
 import logging
+from collections import defaultdict
 from typing import Any
 import time, random
 import math
@@ -1777,6 +1778,115 @@ class LLMReActOrchestratorAgent(Agent):
 
         return "\n".join(lines)
 
+    def _format_evaluation_history_for_reflection(
+        self, stability_tolerance: float
+    ) -> str:
+        """Format evaluation history as an aggregated summary for the reflection LLM.
+
+        Produces three sections:
+        1. High-level summary stats
+        2. Per-composition aggregated table (sorted by best e_above_hull)
+        3. Compact chronological query log (no structure details)
+        """
+        if not self.evaluation_history:
+            return "No evaluations yet."
+
+        # --- Collect per-entry data ---
+        entries_data = []
+        for entry in self.evaluation_history:
+            comp = entry.get("composition", "?")
+            e_hull = entry.get("e_above_hull", float("inf"))
+            is_stable = entry.get("is_stable", False)
+            is_novel = entry.get("is_newly_discovered", False)
+
+            status = []
+            if is_stable:
+                status.append("STABLE")
+            elif e_hull <= stability_tolerance:
+                status.append("METASTABLE")
+            if is_novel:
+                status.append("NOVEL")
+            status_str = ", ".join(status) if status else "unstable"
+
+            entries_data.append(
+                {
+                    "comp": comp,
+                    "e_hull": e_hull,
+                    "is_stable": is_stable,
+                    "is_novel": is_novel,
+                    "status_str": status_str,
+                }
+            )
+
+        # --- Section 1: Summary stats ---
+        total = len(entries_data)
+        n_stable = sum(1 for e in entries_data if e["is_stable"])
+        n_novel = sum(1 for e in entries_data if e["is_novel"])
+        n_novel_stable = sum(
+            1 for e in entries_data if e["is_stable"] and e["is_novel"]
+        )
+        e_hulls = [e["e_hull"] for e in entries_data if e["e_hull"] != float("inf")]
+        avg_e = sum(e_hulls) / len(e_hulls) if e_hulls else float("inf")
+        best_e = min(e_hulls) if e_hulls else float("inf")
+        worst_e = max(e_hulls) if e_hulls else float("inf")
+        best_comp = next(
+            (e["comp"] for e in entries_data if e["e_hull"] == best_e), "?"
+        )
+        worst_comp = next(
+            (e["comp"] for e in entries_data if e["e_hull"] == worst_e), "?"
+        )
+
+        summary_lines = [
+            "=== SUMMARY ===",
+            f"Queries: {total} | Stable: {n_stable} | Novel: {n_novel} | Novel+Stable: {n_novel_stable}",
+            f"Avg e_above_hull: {avg_e:.3f} | Best: {best_e:.3f} ({best_comp}) | Worst: {worst_e:.3f} ({worst_comp})",
+        ]
+
+        # --- Section 2: Per-composition aggregation ---
+        comp_groups: dict[str, list[dict]] = defaultdict(list)
+        for e in entries_data:
+            comp_groups[e["comp"]].append(e)
+
+        comp_rows = []
+        for comp, group in comp_groups.items():
+            count = len(group)
+            stable_count = sum(1 for e in group if e["is_stable"])
+            novel_count = sum(1 for e in group if e["is_novel"])
+            best = min(e["e_hull"] for e in group)
+            worst = max(e["e_hull"] for e in group)
+            comp_rows.append(
+                {
+                    "comp": comp,
+                    "count": count,
+                    "stable": stable_count,
+                    "novel": novel_count,
+                    "best": best,
+                    "worst": worst,
+                }
+            )
+        comp_rows.sort(key=lambda r: r["best"])
+
+        comp_lines = ["", "=== BY COMPOSITION (sorted by best e_above_hull) ==="]
+        for r in comp_rows:
+            parts = [f"{r['count']} {'query' if r['count'] == 1 else 'queries'}"]
+            parts.append(f"{r['stable']} stable")
+            if r["novel"] > 0:
+                parts.append(f"{r['novel']} novel")
+            if r["count"] == 1:
+                parts.append(f"e={r['best']:.3f}")
+            else:
+                parts.append(f"best={r['best']:.3f}, worst={r['worst']:.3f}")
+            comp_lines.append(f"  {r['comp']}: {', '.join(parts)}")
+
+        # --- Section 3: Compact chronological log ---
+        log_lines = ["", "=== CHRONOLOGICAL LOG ==="]
+        for i, e in enumerate(entries_data, 1):
+            log_lines.append(
+                f"  {i:>2}. {e['comp']} [{e['status_str']}] e={e['e_hull']:.4f}"
+            )
+
+        return "\n".join(summary_lines + comp_lines + log_lines)
+
     def _format_known_stable_materials(self, state: dict[str, Any]) -> str:
         """Format known stable materials from phase diagram."""
         entries_raw = state.get("phase_diagram_all_entries", [])
@@ -1869,7 +1979,9 @@ class LLMReActOrchestratorAgent(Agent):
         if not self.enable_reflexion or self.self_reflection_module is None:
             return ""
 
-        episode_summary = self._format_evaluation_history(stability_tolerance)
+        episode_summary = self._format_evaluation_history_for_reflection(
+            stability_tolerance
+        )
 
         num_stable = episode_metrics.get("num_novel_stable_discovered", 0)
         recall = episode_metrics.get("recall", 0.0)
