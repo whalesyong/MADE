@@ -28,6 +28,7 @@ set -euo pipefail
 #   INITIAL_FAMILY_MODE=easy bash scripts/run_table1_llm_orch_only.sh
 #   RUN_PROFILE=fast bash scripts/run_table1_llm_orch_only.sh
 #   PARALLEL_SYSTEM_RUNS=3 bash scripts/run_table1_llm_orch_only.sh
+#   NUM_PARALLEL_SYSTEMS=4 bash scripts/run_table1_llm_orch_only.sh
 #
 # Optional preflight controls:
 #   CHECK_LLM_BACKEND=0                  # skip endpoint check
@@ -72,7 +73,8 @@ STABILITY_TOLERANCE="${STABILITY_TOLERANCE:-0.1}"
 OUTPUT_DIR="${OUTPUT_DIR:-./results/baselines}"
 
 MAX_STOICHIOMETRY="${MAX_STOICHIOMETRY:-20}"
-PARALLEL_SYSTEM_RUNS="${PARALLEL_SYSTEM_RUNS:-1}"   # 1 = sequential, 2/3 = concurrent
+PARALLEL_SYSTEM_RUNS="${PARALLEL_SYSTEM_RUNS:-1}"   # 1 = sequential, 2/3 = concurrent (across system files)
+NUM_PARALLEL_SYSTEMS="${NUM_PARALLEL_SYSTEMS:-1}"   # systems to run in parallel within each file
 
 if ! [[ "${PARALLEL_SYSTEM_RUNS}" =~ ^[0-9]+$ ]] || (( PARALLEL_SYSTEM_RUNS < 1 || PARALLEL_SYSTEM_RUNS > 3 )); then
   echo "ERROR: PARALLEL_SYSTEM_RUNS must be an integer in [1, 3]"
@@ -201,7 +203,8 @@ echo "  Episodes: ${NUM_EPISODES}"
 echo "  Stability tolerance (eV): ${STABILITY_TOLERANCE}"
 echo "  Output base dir: ${OUTPUT_DIR}"
 echo "  System scope: ${SYSTEM_SCOPE}"
-echo "  Parallel system runs: ${PARALLEL_SYSTEM_RUNS}"
+echo "  Parallel system runs (across files): ${PARALLEL_SYSTEM_RUNS}"
+echo "  Parallel systems (within file):     ${NUM_PARALLEL_SYSTEMS}"
 echo "  Resume flag: ${RESUME_FLAG}"
 echo "  Stop-on-error: ${STOP_ON_ERROR_FLAG:-off}"
 echo "  Reflexion: ${REFLEXION_FLAG:-off}"
@@ -230,6 +233,7 @@ run_one_system_file() {
     --max-stoichiometry "${MAX_STOICHIOMETRY}"
     --infra "${INFRA}"
     --output-dir "${system_output_dir}"
+    --parallel-systems "${NUM_PARALLEL_SYSTEMS}"
     "${RESUME_FLAG}"
   )
 

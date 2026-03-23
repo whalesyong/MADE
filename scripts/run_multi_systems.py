@@ -11,6 +11,7 @@ import importlib.util
 import json
 import logging
 import os
+from concurrent.futures import ProcessPoolExecutor, as_completed
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -73,6 +74,58 @@ def aggregate_metrics(per_episode: list[dict[str, Any]]) -> dict[str, dict[str, 
                 "sem": float(np.std(arr) / np.sqrt(n)) if n > 0 else 0.0,
             }
     return summary
+
+
+def _save_episode_outputs(
+    system_id: str, ep: int, result: dict, trajectories_dir: Path
+) -> None:
+    """Write trajectory JSON and phase diagram image for a completed episode."""
+    with open(trajectories_dir / f"episode_{ep:03d}.json", "w") as f:
+        json.dump(result, f, indent=2)
+    num_elements = len(result["final_env_state"].get("elements", []))
+    if num_elements <= 4:
+        phase_diagram = PhaseDiagram(
+            [
+                PDEntry.from_dict(e)
+                for e in result["final_env_state"]["phase_diagram_all_entries"]
+            ]
+        )
+        fig = phase_diagram.get_plot(backend="plotly", show_unstable=1.0)
+        fig.write_image(trajectories_dir / f"phase_diagram_episode_{ep:03d}.png")
+
+
+def _run_system_local(
+    system_id: str,
+    elements: list[str],
+    cfg_container: dict,
+    trajectories_dir_str: str,
+    num_episodes: int,
+    wandb_run_name: str,
+) -> tuple[str, list[dict[str, Any]]]:
+    """Run all episodes for one chemical system sequentially.
+
+    Module-level (not nested) so it is picklable by ProcessPoolExecutor.
+    Episodes run sequentially to preserve the reflexion invariant: episode N+1
+    reads the reflection file written by episode N before it starts.
+    """
+    dotenv.load_dotenv()
+
+    rb = _import_run_benchmark()
+    cfg_sys = OmegaConf.create(cfg_container)
+    cfg_sys.dataset.elements = list(elements)
+    trajectories_dir = Path(trajectories_dir_str)
+
+    per_episode_metrics: list[dict[str, Any]] = []
+    try:
+        for ep in range(num_episodes):
+            result = rb.run_episode_local(
+                cfg_sys, ep, wandb_run_name=wandb_run_name, system_id=system_id
+            )
+            per_episode_metrics.append(result.get("metrics", {}))
+            _save_episode_outputs(system_id, ep, result, trajectories_dir)
+    except KeyboardInterrupt:
+        pass  # return whatever was collected before the interrupt
+    return system_id, per_episode_metrics
 
 
 @hydra.main(version_base=None, config_path="../configs", config_name="config")
@@ -152,23 +205,6 @@ def run_multi_systems(config: DictConfig) -> None:
         sid: [] for sid, *_ in system_setups
     }
 
-    def _save_episode_outputs(
-        system_id: str, ep: int, result: dict, trajectories_dir: Path
-    ) -> None:
-        """Write trajectory JSON and phase diagram image for a completed episode."""
-        with open(trajectories_dir / f"episode_{ep:03d}.json", "w") as f:
-            json.dump(result, f, indent=2)
-        num_elements = len(result["final_env_state"].get("elements", []))
-        if num_elements <= 4:
-            phase_diagram = PhaseDiagram(
-                [
-                    PDEntry.from_dict(e)
-                    for e in result["final_env_state"]["phase_diagram_all_entries"]
-                ]
-            )
-            fig = phase_diagram.get_plot(backend="plotly", show_unstable=1.0)
-            fig.write_image(trajectories_dir / f"phase_diagram_episode_{ep:03d}.png")
-
     try:
         if config.experiment.infra == "modal":
             # Wave-based parallel dispatch across systems:
@@ -204,37 +240,77 @@ def run_multi_systems(config: DictConfig) -> None:
                                 system_id, ep, result, trajectories_dir
                             )
         else:
-            # Local: systems run sequentially; episodes within each system run sequentially
-            # (required for reflexion — ep N+1 needs ep N's reflection on disk first).
-            for sys_idx, (system_id, cfg_sys, trajectories_dir, _) in enumerate(
-                system_setups
-            ):
-                logger.info(
-                    f"Running system {sys_idx + 1}/{len(system_setups)}: {system_id}"
-                )
-                try:
-                    for ep in tqdm.trange(
-                        num_episodes, desc=f"Episodes ({system_id})"
-                    ):
-                        result = rb.run_episode_local(
-                            cfg_sys,
-                            ep,
-                            wandb_run_name=wandb_run_name,
-                            system_id=system_id,
-                        )
-                        per_system_metrics[system_id].append(
-                            result.get("metrics", {})
-                        )
-                        _save_episode_outputs(
-                            system_id, ep, result, trajectories_dir
-                        )
-                except KeyboardInterrupt:
-                    import traceback
+            # Local path.
+            # num_parallel_systems > 1: run that many systems concurrently, each in its
+            # own worker process. Episodes within a system stay sequential (reflexion).
+            # num_parallel_systems == 1 (default): fully sequential, original behaviour.
+            num_parallel = int(config.experiment.get("num_parallel_systems", 1))
 
-                    logger.warning(
-                        f"Keyboard interrupt during system {system_id}, stopping its "
-                        f"episodes. Stack trace: {traceback.format_exc()}"
+            if num_parallel > 1:
+                logger.info(
+                    f"Running {len(system_setups)} systems with "
+                    f"{num_parallel} parallel worker(s)"
+                )
+                worker_args_list = [
+                    (
+                        system_id,
+                        list(cfg_sys.dataset.elements),
+                        OmegaConf.to_container(cfg_sys, resolve=False),
+                        str(trajectories_dir),
+                        num_episodes,
+                        wandb_run_name,
                     )
+                    for system_id, cfg_sys, trajectories_dir, _ in system_setups
+                ]
+                with ProcessPoolExecutor(max_workers=num_parallel) as executor:
+                    futures = {
+                        executor.submit(_run_system_local, *args): args[0]
+                        for args in worker_args_list
+                    }
+                    for future in as_completed(futures):
+                        sid = futures[future]
+                        try:
+                            _, metrics = future.result()
+                            per_system_metrics[sid] = metrics
+                            logger.info(
+                                f"System {sid} completed "
+                                f"({len(metrics)} episode(s))"
+                            )
+                        except Exception as e:
+                            logger.error(
+                                f"System {sid} failed: {e}", exc_info=True
+                            )
+            else:
+                # Sequential: systems one at a time, episodes one at a time.
+                for sys_idx, (system_id, cfg_sys, trajectories_dir, _) in enumerate(
+                    system_setups
+                ):
+                    logger.info(
+                        f"Running system {sys_idx + 1}/{len(system_setups)}: {system_id}"
+                    )
+                    try:
+                        for ep in tqdm.trange(
+                            num_episodes, desc=f"Episodes ({system_id})"
+                        ):
+                            result = rb.run_episode_local(
+                                cfg_sys,
+                                ep,
+                                wandb_run_name=wandb_run_name,
+                                system_id=system_id,
+                            )
+                            per_system_metrics[system_id].append(
+                                result.get("metrics", {})
+                            )
+                            _save_episode_outputs(
+                                system_id, ep, result, trajectories_dir
+                            )
+                    except KeyboardInterrupt:
+                        import traceback
+
+                        logger.warning(
+                            f"Keyboard interrupt during system {system_id}, stopping its "
+                            f"episodes. Stack trace: {traceback.format_exc()}"
+                        )
     except KeyboardInterrupt:
         import traceback
 

@@ -70,6 +70,7 @@ def run_single_baseline_experiment(
     enable_reflexion: bool = False,
     initial_family_mode: str | None = None,
     initial_family_file: str = "./data/initial_family_prompts.json",
+    parallel_systems: int = 1,
 ) -> Path:
     """
     Run a single baseline experiment.
@@ -88,6 +89,7 @@ def run_single_baseline_experiment(
         wandb_tags: List of wandb tags
         initial_family_mode: "hard" or "easy" to inject composition guidance in ep 0
         initial_family_file: Path to JSON with hard/easy families per system
+        parallel_systems: Number of systems to run in parallel (local infra only, default 1)
 
     Returns:
         Path to output directory
@@ -122,6 +124,8 @@ def run_single_baseline_experiment(
         f"environment.max_stoichiometry={max_stoichiometry}",
         # reflexion
         f"++agent.enable_reflexion={str(enable_reflexion).lower()}",
+        # within-file system parallelism
+        f"++experiment.num_parallel_systems={parallel_systems}",
     ]
 
     if initial_family_mode:
@@ -267,6 +271,7 @@ def run_multiple_baseline_experiments(
     enable_reflexion: bool = False,
     initial_family_mode: str | None = None,
     initial_family_file: str = "./data/initial_family_prompts.json",
+    parallel_systems: int = 1,
 ) -> dict[str, Path | None]:
     """
     Run multiple baseline experiments.
@@ -284,6 +289,7 @@ def run_multiple_baseline_experiments(
         wandb_project: Wandb project name
         wandb_tags: List of wandb tags
         continue_on_error: If True, continue with remaining experiments on error
+        parallel_systems: Number of systems to run in parallel (local infra only)
 
     Returns:
         Dictionary mapping agent_config -> output_dir (or None if failed)
@@ -317,6 +323,7 @@ def run_multiple_baseline_experiments(
                 enable_reflexion=enable_reflexion,
                 initial_family_mode=initial_family_mode,
                 initial_family_file=initial_family_file,
+                parallel_systems=parallel_systems,
             )
             results[agent_config] = output_dir
         except Exception as e:
@@ -453,6 +460,16 @@ def main():
         default="./data/initial_family_prompts.json",
         help="Path to JSON file with hard/easy families per system (default: ./data/initial_family_prompts.json)",
     )
+    parser.add_argument(
+        "--parallel-systems",
+        type=int,
+        default=1,
+        help=(
+            "Number of chemical systems to run in parallel within each systems file "
+            "(local infra only, default 1). Each worker loads its own oracle, so set "
+            "this to the number of available CPU/GPU slots."
+        ),
+    )
 
     args = parser.parse_args()
 
@@ -492,6 +509,7 @@ def main():
         enable_reflexion=args.reflexion,
         initial_family_mode=args.initial_family_mode,
         initial_family_file=args.initial_family_file,
+        parallel_systems=args.parallel_systems,
     )
 
     # Print summary
