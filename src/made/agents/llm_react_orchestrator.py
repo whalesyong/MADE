@@ -1739,7 +1739,20 @@ class LLMReActOrchestratorAgent(Agent):
         return "\n".join(lines)
 
     def _format_evaluation_history(self, stability_tolerance: float) -> str:
-        """Format evaluation history for LLM context."""
+        """Format evaluation history as an aggregated summary for the ReAct agent.
+
+        Produces three sections:
+        1. High-level summary stats (total queries, stable count, avg e_above_hull)
+        2. Per-composition aggregated table sorted by best e_above_hull — makes
+           diminishing-returns and winning compositions immediately obvious
+        3. Compact recent query log (last 5) with optional structure details
+           for recency context
+
+        This replaces the previous flat list of the last N entries, which forced
+        the LLM to scan and mentally aggregate repeated compositions. The
+        aggregated format covers *all* prior queries without a sliding window,
+        uses similar or fewer tokens, and surfaces clearer signals.
+        """
         if not self.evaluation_history:
             return "No evaluations yet."
 
@@ -1747,36 +1760,77 @@ class LLMReActOrchestratorAgent(Agent):
             "include_structure_in_history", False
         )
 
-        lines = []
-        recent = self.evaluation_history[-self.max_history_length :]
-        for i, entry in enumerate(recent, 1):
+        # --- Collect per-entry data ---
+        entries = []
+        for entry in self.evaluation_history:
             comp = entry.get("composition", "?")
             e_hull = entry.get("e_above_hull", float("inf"))
             is_stable = entry.get("is_stable", False)
             is_novel = entry.get("is_newly_discovered", False)
+            entries.append({
+                "comp": comp,
+                "e_hull": e_hull,
+                "is_stable": is_stable,
+                "is_novel": is_novel,
+                "structure": entry.get("structure"),
+            })
 
+        # --- Section 1: Summary stats ---
+        total = len(entries)
+        n_stable = sum(1 for e in entries if e["is_stable"])
+        n_novel = sum(1 for e in entries if e["is_novel"])
+        e_hulls = [e["e_hull"] for e in entries if e["e_hull"] != float("inf")]
+        avg_e = sum(e_hulls) / len(e_hulls) if e_hulls else float("inf")
+        best_e = min(e_hulls) if e_hulls else float("inf")
+
+        lines = [
+            "=== SUMMARY ===",
+            f"Queries: {total} | Stable: {n_stable}/{total} | Novel: {n_novel} | "
+            f"Avg e_above_hull: {avg_e:.3f} | Best: {best_e:.3f}",
+        ]
+
+        # --- Section 2: Per-composition aggregation ---
+        comp_groups: dict[str, list[dict]] = {}
+        for e in entries:
+            comp_groups.setdefault(e["comp"], []).append(e)
+
+        comp_lines = ["", "=== BY COMPOSITION (sorted by best e_above_hull) ==="]
+        sorted_comps = sorted(comp_groups.items(), key=lambda x: min(e["e_hull"] for e in x[1]))
+        for comp, group in sorted_comps:
+            count = len(group)
+            stable_count = sum(1 for e in group if e["is_stable"])
+            novel_count = sum(1 for e in group if e["is_novel"])
+            best = min(e["e_hull"] for e in group)
+            worst = max(e["e_hull"] for e in group)
+            parts = [f"{count}q", f"{stable_count} stable", f"{novel_count} novel"]
+            if count == 1:
+                parts.append(f"e={best:.3f}")
+            else:
+                parts.append(f"best={best:.3f} worst={worst:.3f}")
+            comp_lines.append(f"  {comp}: {', '.join(parts)}")
+
+        # --- Section 3: Compact recent log (last 5) ---
+        n_recent = 5
+        recent = entries[-n_recent:]
+        start_idx = total - len(recent) + 1
+        recent_lines = ["", "=== LAST 5 QUERIES ==="]
+        for i, e in enumerate(recent, start_idx):
             status = []
-            if is_stable:
-                status.append("STABLE")
-            elif e_hull <= stability_tolerance:
-                status.append("METASTABLE")
-            if is_novel:
-                status.append("NOVEL")
-            status_str = ", ".join(status) if status else "unstable"
+            if e["is_stable"]:
+                status.append("S")
+            if e["is_novel"]:
+                status.append("N")
+            tag = ",".join(status) if status else "-"
+            line = f"  {i}. {e['comp']} [{tag}] e={e['e_hull']:.3f}"
 
-            line = f"{i}. {comp} [{status_str}, e_above_hull={e_hull:.4f}]"
+            if include_structures and e.get("structure"):
+                struct_str = str(e["structure"])
+                indented = "\n     ".join(struct_str.split("\n"))
+                line += f"\n     {indented}"
 
-            # Optionally add full structure info
-            if include_structures and entry.get("structure"):
-                structure = entry["structure"]
-                struct_str = str(structure)
-                # Indent each line for better formatting
-                indented_struct = "\n   ".join(struct_str.split("\n"))
-                line += f"\n   {indented_struct}"
+            recent_lines.append(line)
 
-            lines.append(line)
-
-        return "\n".join(lines)
+        return "\n".join(lines + comp_lines + recent_lines)
 
     def _format_evaluation_history_for_reflection(
         self, stability_tolerance: float
@@ -1984,7 +2038,7 @@ class LLMReActOrchestratorAgent(Agent):
         )
 
         num_stable = episode_metrics.get("num_novel_stable_discovered", 0)
-        recall = episode_metrics.get("recall", 0.0)
+        recall = episode_metrics.get("recall_formula", 0.0)
         num_queries = len(self.evaluation_history)
         outcome = (
             f"Novel stable structures found: {num_stable}\n"
