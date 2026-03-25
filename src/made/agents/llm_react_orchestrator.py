@@ -114,6 +114,12 @@ class SelfReflectionSignature(dspy.Signature):
     - Mistakes or inefficiencies to avoid repeating
     - Concrete strategy changes for the next episode
 
+    Metric interpretation guardrails:
+    - "NOVEL" is local structural novelty within this run: not matching MP-database initial structures, 
+    and not matching previously discovered structures in this episode.
+    - "Recall" is recovery of ground-truth stable formulas missing at initialization.
+    - Novel counts and recall can diverge; do not assume "high novel + low recall" implies a bug.
+
     Be specific and concise. Write 3-5 bullet points. Avoid vague advice like "explore more".
     """
 
@@ -2043,11 +2049,18 @@ class LLMReActOrchestratorAgent(Agent):
             episode_metrics.get("num_novel_stable_discovered", 0),
         )
         recall = episode_metrics.get("recall_formula", 0.0)
+        recall_num = episode_metrics.get("num_correct_stable_formulas", 0)
+        recall_den = episode_metrics.get("num_gt_formulas_missing_initial", 0)
         num_queries = len(self.evaluation_history)
         outcome = (
             f"Novel stable structures found: {num_stable}\n"
             f"Recall (fraction of known stable phases discovered): {recall:.3f}\n"
-            f"Oracle queries used: {num_queries}"
+            f"Recall numerator/denominator: {recall_num}/{recall_den}\n"
+            f"Oracle queries used: {num_queries}\n"
+            "Definitions:\n"
+            "- Novel stable structures found = stable structures that are locally novel in this run (vs initial structures and prior discoveries).\n"
+            "- Recall = fraction of ground-truth stable formulas (missing at initialization) that were recovered.\n"
+            "- Novel and recall are different metrics and can diverge."
         )
 
         prior = (
