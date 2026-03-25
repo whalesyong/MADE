@@ -1,70 +1,516 @@
 {
-  "Mg-Sn-Sr": {
+  "Ag-Nd-Pd-Pt-Tb": {
     "hard": [
-      "Mg4Sn1Sr3",
-      "Mg1Sn1Sr3",
-      "Mg4Sn1Sr1",
-      "Mg2Sn1Sr1",
-      "Mg5Sn1Sr1",
-      "Mg2Sn1Sr2",
-      "Mg4Sn1Sr2",
-      "Mg3Sn1Sr3",
-      "Mg2Sn3Sr3",
-      "Sn3Sr4",
-      "Mg1Sn2Sr4",
-      "Sn1Sr3",
-      "Mg2Sn1Sr3",
-      "Sn1Sr5",
-      "Mg3Sn2Sr2",
-      "Mg3Sn1Sr2"
+      "Ag1Pt4",
+      "Ag3Pd1",
+      "Nd1Pd3",
+      "Nd1Pt5",
+      "Nd3Pd4",
+      "Nd7Pd3",
+      "Nd7Pt3",
+      "Pd3Tb1",
+      "Pd4Tb3",
+      "Pt1Tb2",
+      "Pt1Tb3",
+      "Pt3Tb1",
+      "Pt4Tb3"
     ],
     "easy": [
-      "Mg1Sn1",
-      "Mg1Sn2",
-      "Mg1Sn2Sr2",
-      "Mg1Sn3Sr2",
-      "Mg1Sn5Sr1",
-      "Mg2Sn1",
-      "Mg2Sn2Sr1",
-      "Mg2Sn3Sr1",
-      "Mg2Sr1",
-      "Sn1Sr2",
-      "Sn3Sr1",
-      "Mg3Sn2Sr1",
-      "Mg3Sn1Sr1"
+      "Ag1Nd1",
+      "Ag1Pd1",
+      "Ag1Pt1",
+      "Ag1Tb1",
+      "Ag2Nd1",
+      "Ag2Tb1",
+      "Nd1Pd1",
+      "Nd1Pt1",
+      "Nd1Pt2",
+      "Pd1Pt1",
+      "Pd1Tb1",
+      "Pt1Tb1",
+      "Pt2Tb1"
+    ]
+  },
+  "Al-Hg-K-Mg-W": {
+    "hard": [
+      "Al12W1",
+      "Al5W1",
+      "Hg1Mg3",
+      "Hg3Mg5",
+      "Hg7K2"
+    ],
+    "easy": [
+      "Al2Mg1",
+      "Hg1K1",
+      "Hg1Mg1",
+      "Hg2K1"
+    ]
+  },
+  "Al-Li-V": {
+    "hard": [
+      "Al1V3",
+      "Al2Li3",
+      "Al3Li1",
+      "Al3V1"
+    ],
+    "easy": [
+      "Al1Li1",
+      "Al1Li2",
+      "Al1V1"
+    ]
+  },
+  "Al-Lu-Pt-Rb-Sm": {
+    "hard": [
+      "Al1Lu1Pt1",
+      "Al1Pt1Sm1",
+      "Al1Pt3",
+      "Al2Lu3",
+      "Al3Lu1",
+      "Al3Pt2",
+      "Al3Pt5",
+      "Al3Sm1",
+      "Lu1Pt3",
+      "Lu3Pt4",
+      "Pt3Sm1",
+      "Pt3Sm7"
+    ],
+    "easy": [
+      "Al1Lu1",
+      "Al1Pt1",
+      "Al1Pt2",
+      "Al1Sm1",
+      "Al2Lu1",
+      "Al2Pt1",
+      "Al2Sm1",
+      "Lu1Pt1",
+      "Lu2Pt1",
+      "Pt1Sm1",
+      "Pt2Sm1"
+    ]
+  },
+  "Al-V-Zn": {
+    "hard": [
+      "Al1V3",
+      "V1Zn3",
+      "V4Zn5"
+    ],
+    "easy": [
+      "Al1V1",
+      "Al3V1"
+    ]
+  },
+  "Au-Cr-Cs-Dy": {
+    "hard": [
+      "Au1Dy2",
+      "Au2Dy1",
+      "Au3Dy1"
+    ],
+    "easy": [
+      "Au1Cs1",
+      "Au1Dy1"
     ]
   },
   "Au-K-Tb": {
     "hard": [
-      "Au5K1",
-      "Au1K1Tb2",
-      "Au1K1Tb1",
-      "Au2K1Tb1",
-      "Au2K3Tb1",
-      "Au1K2Tb1",
-      "Au1K2Tb2",
-      "Au1K3Tb1",
-      "Au1K1Tb3",
       "Au3K2",
-      "Au3K3Tb1",
-      "Au5K1Tb1",
-      "Au5K2Tb1",
-      "Au7Tb1",
-      "Au5Tb4",
-      "Au4Tb3",
-      "Au3K1Tb1"
+      "Au3Tb1",
+      "Au5K1"
     ],
     "easy": [
-      "Au10Tb7",
-      "Au3K1Tb2",
-      "Au5Tb1",
-      "Au5Tb2",
-      "Au1Tb3",
-      "Au5Tb3",
-      "Au3Tb2",
+      "Au1Tb1",
+      "Au1Tb2",
+      "Au2Tb1"
+    ]
+  },
+  "Au-Tb-V-Y": {
+    "hard": [
+      "Au1V3",
       "Au2Tb1",
-      "Au4Tb1",
-      "Au3Tb1"
+      "Au2Y1",
+      "Au3Tb1",
+      "Au3Y1"
+    ],
+    "easy": [
+      "Au1Tb1",
+      "Au1Tb2",
+      "Au1Y1",
+      "Au1Y2"
+    ]
+  },
+  "Ba-Be-Hf-Li": {
+    "hard": [
+      "Be17Hf2"
+    ],
+    "easy": [
+      "Be5Hf1"
+    ]
+  },
+  "Ba-Nd-Ni-W": {
+    "hard": [
+      "Nd1Ni5",
+      "Nd2Ni7",
+      "Ni4W1"
+    ],
+    "easy": [
+      "Nd1Ni1",
+      "Nd1Ni3",
+      "Nd3Ni1"
+    ]
+  },
+  "Ca-Fe-Gd-Pb-Tb": {
+    "hard": [
+      "Fe17Gd2",
+      "Fe3Tb1",
+      "Gd5Pb3",
+      "Pb3Tb1",
+      "Pb3Tb5"
+    ],
+    "easy": [
+      "Ca1Pb1",
+      "Ca1Pb3",
+      "Ca2Pb1",
+      "Fe2Tb1",
+      "Gd1Pb3"
+    ]
+  },
+  "Ca-Pd-Sn-W": {
+    "hard": [
+      "Ca1Sn3",
+      "Ca2Sn1",
+      "Pd1Sn3"
+    ],
+    "easy": [
+      "Ca1Pd1",
+      "Ca1Pd1Sn1",
+      "Ca1Pd1Sn2",
+      "Ca1Pd2",
+      "Ca1Pd5",
+      "Ca1Sn1",
+      "Ca3Pd1",
+      "Ca3Pd2",
+      "Ca5Pd2",
+      "Pd1Sn1",
+      "Pd1Sn4",
+      "Pd2Sn1",
+      "Pd3Sn1",
+      "Pd3W1"
+    ]
+  },
+  "Cd-Gd-Mn-Na-Ta": {
+    "hard": [
+      "Cd1Na3",
+      "Cd3Gd1",
+      "Cd3Na1",
+      "Gd1Mn12"
+    ],
+    "easy": [
+      "Cd1Gd1",
+      "Cd2Gd1",
+      "Mn2Ta1"
+    ]
+  },
+  "Cd-Li-Nd-Ti-W": {
+    "hard": [
+      "Cd1Li3",
+      "Cd2Nd1",
+      "Cd3Li1",
+      "Cd3Nd1"
+    ],
+    "easy": [
+      "Cd1Li1",
+      "Cd1Nd1",
+      "Cd1Ti2",
+      "Ti1W1"
+    ]
+  },
+  "Ce-Er-Pb-Rh": {
+    "hard": [
+      "Ce1Pb1Rh1",
+      "Ce1Pb3",
+      "Ce3Pb1",
+      "Ce5Pb3",
+      "Er1Pb1Rh2",
+      "Er1Pb3",
+      "Er5Pb3",
+      "Er7Rh3",
+      "Pb5Rh4"
+    ],
+    "easy": [
+      "Ce1Rh1",
+      "Ce1Rh2",
+      "Ce1Rh3",
+      "Er1Rh1",
+      "Er1Rh2",
+      "Er3Rh1",
+      "Pb1Rh1",
+      "Pb2Rh1"
+    ]
+  },
+  "Ce-Ir-Pt-Sn": {
+    "hard": [
+      "Ce1Ir1Sn1",
+      "Ce1Pt1Sn1",
+      "Ce1Pt5",
+      "Ce2Sn3",
+      "Ce3Pt4",
+      "Ce3Sn7",
+      "Ce5Sn3",
+      "Ce7Ir3",
+      "Ir1Sn4",
+      "Pt1Sn4",
+      "Pt2Sn3"
+    ],
+    "easy": [
+      "Ce1Ir2",
+      "Ce1Ir3",
+      "Ce1Pt1",
+      "Ce1Pt3",
+      "Ce1Sn3",
+      "Ce3Sn1",
+      "Ir1Sn1",
+      "Ir1Sn2",
+      "Pt1Sn1",
+      "Pt1Sn2",
+      "Pt3Sn1"
+    ]
+  },
+  "Co-Dy-Ta-Y": {
+    "hard": [
+      "Co17Dy2",
+      "Co17Y2",
+      "Co1Dy3",
+      "Co3Dy1",
+      "Co3Ta1",
+      "Co6Ta7"
+    ],
+    "easy": [
+      "Co1Ta2",
+      "Co1Y1",
+      "Co1Y3",
+      "Co2Dy1",
+      "Co2Y1"
+    ]
+  },
+  "Co-Dy-W": {
+    "hard": [
+      "Co17Dy2",
+      "Co1Dy3",
+      "Co3W1"
+    ],
+    "easy": [
+      "Co2Dy1",
+      "Co3Dy1"
+    ]
+  },
+  "Co-Hf-In-Ru-Tm": {
+    "hard": [
+      "Co7Tm2",
+      "Hf1Ru1",
+      "In1Tm1"
+    ],
+    "easy": [
+      "Co1Hf1",
+      "Co1In3",
+      "Co2Hf1",
+      "Co2Hf1In1",
+      "Co2In1Tm6",
+      "Co2In4Tm3",
+      "Co2Tm1",
+      "Co7Hf2",
+      "Hf1Ru2Tm1",
+      "Hf2In5",
+      "In1Tm2",
+      "In3Ru1",
+      "In3Tm1",
+      "In4Tm5",
+      "Ru1Tm3",
+      "Ru2Tm1",
+      "Ru2Tm5"
+    ]
+  },
+  "Co-Hg-Mg-Sr-W": {
+    "hard": [
+      "Co3W1",
+      "Hg1Mg3",
+      "Hg2Sr3",
+      "Hg3Mg5",
+      "Hg3Sr1"
+    ],
+    "easy": [
+      "Co2Mg1",
+      "Hg1Mg1",
+      "Hg1Sr1",
+      "Hg2Sr1",
+      "Mg2Sr1"
+    ]
+  },
+  "Co-Mg-Na": {
+    "hard": [
+      "Co2Mg1"
+    ],
+    "easy": []
+  },
+  "Co-Pd-Tl": {
+    "hard": [
+      "Pd2Tl1",
+      "Pd3Tl1"
+    ],
+    "easy": [
+      "Pd1Tl2"
+    ]
+  },
+  "Cr-Fe-Lu-Pt-Sc": {
+    "hard": [
+      "Cr1Pt3",
+      "Fe1Pt3",
+      "Fe2Sc1",
+      "Lu1Pt3",
+      "Lu3Pt4",
+      "Pt3Sc1"
+    ],
+    "easy": [
+      "Fe1Pt1",
+      "Fe2Lu1",
+      "Lu1Pt1",
+      "Lu2Pt1",
+      "Pt1Sc1",
+      "Pt1Sc2"
+    ]
+  },
+  "Dy-K-Pd-Sm": {
+    "hard": [
+      "Dy3Pd2",
+      "Dy3Pd4",
+      "Pd3Sm1",
+      "Pd4Sm3"
+    ],
+    "easy": [
+      "Dy1Pd1",
+      "Dy1Pd3",
+      "Pd1Sm1"
+    ]
+  },
+  "Eu-Nb-Sn-Tl": {
+    "hard": [
+      "Eu1Sn3",
+      "Eu1Tl3",
+      "Eu2Sn1Tl1",
+      "Eu3Sn5",
+      "Eu3Tl1"
+    ],
+    "easy": [
+      "Eu1Sn1",
+      "Eu1Tl2",
+      "Eu2Sn1",
+      "Nb1Sn2",
+      "Nb3Sn1"
+    ]
+  },
+  "Ga-Ho-Lu": {
+    "hard": [
+      "Ga3Ho1",
+      "Ga3Ho5",
+      "Ga3Lu1",
+      "Ga3Lu5"
+    ],
+    "easy": [
+      "Ga1Ho1",
+      "Ga1Lu1",
+      "Ga2Ho1",
+      "Ga2Lu1"
+    ]
+  },
+  "Ga-Pt-Tm": {
+    "hard": [
+      "Ga1Pt1Tm1",
+      "Ga3Pt5",
+      "Ga3Tm1",
+      "Ga3Tm5",
+      "Ga7Pt3",
+      "Pt3Tm1",
+      "Pt4Tm3"
+    ],
+    "easy": [
+      "Ga1Pt1",
+      "Ga1Pt3",
+      "Ga1Tm1",
+      "Ga2Pt1",
+      "Ga2Tm1",
+      "Pt1Tm1",
+      "Pt1Tm2"
+    ]
+  },
+  "Hf-Ni-Zr": {
+    "hard": [
+      "Hf1Ni3",
+      "Ni3Zr1",
+      "Ni7Zr2"
+    ],
+    "easy": [
+      "Hf1Ni1",
+      "Ni1Zr1",
+      "Ni1Zr2"
+    ]
+  },
+  "Ho-In-Mg-Pd-Zr": {
+    "hard": [
+      "Ho1In1",
+      "Ho1Mg1",
+      "Ho3In5",
+      "In1Mg1Pd2",
+      "In1Pd1",
+      "In1Pd3",
+      "In1Zr3",
+      "In3Pd5",
+      "In3Zr1",
+      "In7Pd3",
+      "Pd1Zr1"
+    ],
+    "easy": [
+      "Ho1In1Mg1",
+      "Ho1In1Pd1",
+      "Ho1In1Pd2",
+      "Ho1In3",
+      "Ho1Mg1Pd1",
+      "Ho1Mg3",
+      "Ho1Pd1",
+      "Ho1Pd3",
+      "Ho2In1",
+      "Ho2In1Mg1",
+      "Ho2In1Pd2",
+      "Ho3Pd4",
+      "Ho5In3",
+      "In1Mg1",
+      "In1Mg3",
+      "In1Pd2",
+      "In1Pd2Zr1",
+      "In1Zr1",
+      "In2Zr1",
+      "In3Pd2",
+      "Mg1Pd1",
+      "Mg1Pd2",
+      "Mg1Pd2Zr1",
+      "Mg1Pd3",
+      "Mg1Pd5",
+      "Mg2Pd1",
+      "Mg3Pd1",
+      "Mg3Pd5",
+      "Pd1Zr2",
+      "Pd3Zr1"
+    ]
+  },
+  "Mg-Sn-Sr": {
+    "hard": [
+      "Mg1Sn1Sr1",
+      "Sn3Sr1",
+      "Sn3Sr5",
+      "Sn5Sr3"
+    ],
+    "easy": [
+      "Mg2Sn1",
+      "Mg2Sr1",
+      "Sn1Sr1",
+      "Sn1Sr2"
     ]
   }
 }

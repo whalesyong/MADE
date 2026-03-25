@@ -2037,7 +2037,11 @@ class LLMReActOrchestratorAgent(Agent):
             stability_tolerance
         )
 
-        num_stable = episode_metrics.get("num_novel_stable_discovered", 0)
+        # Prefer the current environment metric key, with backward-compat fallback.
+        num_stable = episode_metrics.get(
+            "num_newly_discovered_stable",
+            episode_metrics.get("num_novel_stable_discovered", 0),
+        )
         recall = episode_metrics.get("recall_formula", 0.0)
         num_queries = len(self.evaluation_history)
         outcome = (
