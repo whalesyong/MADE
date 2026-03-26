@@ -75,20 +75,21 @@ except ImportError:
 # Global limits
 # ---------------------------------------------------------------------------
 
-TRAJECTORY_TOOL_ARGS_MAX_CHARS = 300
-TRAJECTORY_OBSERVATION_MAX_CHARS = 400
+# Set any value to None to disable that limit.
+TRAJECTORY_TOOL_ARGS_MAX_CHARS: int | None = None
+TRAJECTORY_OBSERVATION_MAX_CHARS: int | None = None
 
-STEP_CONTEXT_FIELD_MAX_CHARS = 1500
-STEP_REASONING_MAX_CHARS = 1000
-STEP_ANSWER_MAX_CHARS = 500
-STEP_TRAJECTORY_MAX_CHARS = 3000
-STEP_SUMMARY_MAX_TOKENS = 600
+STEP_CONTEXT_FIELD_MAX_CHARS: int | None = None
+STEP_REASONING_MAX_CHARS: int | None = None
+STEP_ANSWER_MAX_CHARS: int | None = None
+STEP_TRAJECTORY_MAX_CHARS: int | None = None
+STEP_SUMMARY_MAX_TOKENS: int | None = None
 
-REFLECTION_CONTEXT_OTHER_FIELD_MAX_CHARS = 1000
-REFLECTION_CONTEXT_EPISODE_TRAJECTORY_MAX_CHARS = 2500
-REFLECTION_PROMPT_CONTEXT_MAX_CHARS = 5000
-REFLECTION_PROMPT_TEXT_MAX_CHARS = 4000
-REFLECTION_SUMMARY_MAX_TOKENS = 500
+REFLECTION_CONTEXT_OTHER_FIELD_MAX_CHARS: int | None = None
+REFLECTION_CONTEXT_EPISODE_TRAJECTORY_MAX_CHARS: int | None = None
+REFLECTION_PROMPT_CONTEXT_MAX_CHARS: int | None = None
+REFLECTION_PROMPT_TEXT_MAX_CHARS: int | None = None
+REFLECTION_SUMMARY_MAX_TOKENS: int | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -162,6 +163,19 @@ def parse_dspy_fields(content: str) -> dict[str, str]:
     return {k: v.strip() for k, v in matches}
 
 
+def truncate_text(text: str, max_chars: int | None) -> str:
+    """Truncate text with ellipsis; None disables truncation."""
+    if max_chars is None:
+        return text
+    if max_chars <= 0:
+        return ""
+    if len(text) <= max_chars:
+        return text
+    if max_chars <= 3:
+        return text[:max_chars]
+    return text[: max_chars - 3] + "..."
+
+
 def format_trajectory(trajectory: dict) -> str:
     """Convert trajectory dict (thought_N / tool_name_N / tool_args_N / observation_N) to readable text."""
     lines: list[str] = []
@@ -176,14 +190,11 @@ def format_trajectory(trajectory: dict) -> str:
             lines.append(f"[Thought {i + 1}] {thought}")
         if tool:
             args_str = json.dumps(args, default=str)
-            # Keep args brief
-            if len(args_str) > TRAJECTORY_TOOL_ARGS_MAX_CHARS:
-                args_str = args_str[: TRAJECTORY_TOOL_ARGS_MAX_CHARS - 3] + "..."
+            args_str = truncate_text(args_str, TRAJECTORY_TOOL_ARGS_MAX_CHARS)
             lines.append(f"[Action {i + 1}] {tool}({args_str})")
         if obs:
             obs_str = str(obs)
-            if len(obs_str) > TRAJECTORY_OBSERVATION_MAX_CHARS:
-                obs_str = obs_str[: TRAJECTORY_OBSERVATION_MAX_CHARS - 3] + "..."
+            obs_str = truncate_text(obs_str, TRAJECTORY_OBSERVATION_MAX_CHARS)
             lines.append(f"[Observation {i + 1}] {obs_str}")
         i += 1
 
@@ -206,9 +217,7 @@ def build_context_fields(entry: dict) -> str:
             for key in ("evaluation_history", "buffer_summary", "prior_reflections", "known_stable_materials"):
                 val = fields.get(key, "")
                 if val and val.lower() not in ("none", "no evaluations yet.", ""):
-                    # Truncate long histories
-                    if len(val) > STEP_CONTEXT_FIELD_MAX_CHARS:
-                        val = val[: STEP_CONTEXT_FIELD_MAX_CHARS - 3] + "..."
+                    val = truncate_text(val, STEP_CONTEXT_FIELD_MAX_CHARS)
                     sections.append(f"[{key}]\n{val}")
             return "\n\n".join(sections)
 
@@ -244,8 +253,7 @@ def build_reflection_context_fields(entry: dict) -> str:
                     if key == "episode_trajectory"
                     else REFLECTION_CONTEXT_OTHER_FIELD_MAX_CHARS
                 )
-                if len(val) > max_len:
-                    val = val[: max_len - 3] + "..."
+                val = truncate_text(val, max_len)
                 sections.append(f"[{key}]\n{val}")
         if sections:
             return "\n\n".join(sections)
@@ -316,29 +324,31 @@ async def summarize_step(
     """Call the LLM to produce a causal summary for one orchestrator step."""
     output = entry.get("output", {})
     trajectory_text = format_trajectory(output.get("trajectory", {}))
-    reasoning = str(output.get("reasoning", ""))[:STEP_REASONING_MAX_CHARS]
-    answer = str(output.get("answer", ""))[:STEP_ANSWER_MAX_CHARS]
+    reasoning = truncate_text(str(output.get("reasoning", "")), STEP_REASONING_MAX_CHARS)
+    answer = truncate_text(str(output.get("answer", "")), STEP_ANSWER_MAX_CHARS)
     eval_count = entry.get("extra", {}).get("evaluation_history_len", 0)
     context_fields = build_context_fields(entry)
 
     user_msg = CAUSAL_SUMMARY_USER.format(
         eval_count=eval_count,
         context_fields=context_fields,
-        trajectory=trajectory_text[:STEP_TRAJECTORY_MAX_CHARS],
+        trajectory=truncate_text(trajectory_text, STEP_TRAJECTORY_MAX_CHARS),
         reasoning=reasoning,
         answer=answer,
     )
 
     async with semaphore:
-        response = await client.chat.completions.create(
-            model=model.removeprefix("openai/"),
-            messages=[
+        kwargs = {
+            "model": model.removeprefix("openai/"),
+            "messages": [
                 {"role": "system", "content": CAUSAL_SUMMARY_SYSTEM},
                 {"role": "user", "content": user_msg},
             ],
-            temperature=0.1,
-            max_tokens=STEP_SUMMARY_MAX_TOKENS,
-        )
+            "temperature": 0.1,
+        }
+        if STEP_SUMMARY_MAX_TOKENS is not None:
+            kwargs["max_tokens"] = STEP_SUMMARY_MAX_TOKENS
+        response = await client.chat.completions.create(**kwargs)
 
     raw = response.choices[0].message.content or ""
     summary = parse_json_response(raw)
@@ -363,20 +373,22 @@ async def summarize_reflection(
     context_fields = build_reflection_context_fields(entry)
 
     user_msg = REFLECTION_CAUSAL_USER.format(
-        context_fields=context_fields[:REFLECTION_PROMPT_CONTEXT_MAX_CHARS],
-        reflection=reflection_text[:REFLECTION_PROMPT_TEXT_MAX_CHARS],
+        context_fields=truncate_text(context_fields, REFLECTION_PROMPT_CONTEXT_MAX_CHARS),
+        reflection=truncate_text(reflection_text, REFLECTION_PROMPT_TEXT_MAX_CHARS),
     )
 
     async with semaphore:
-        response = await client.chat.completions.create(
-            model=model.removeprefix("openai/"),
-            messages=[
+        kwargs = {
+            "model": model.removeprefix("openai/"),
+            "messages": [
                 {"role": "system", "content": REFLECTION_CAUSAL_SYSTEM},
                 {"role": "user", "content": user_msg},
             ],
-            temperature=0.1,
-            max_tokens=REFLECTION_SUMMARY_MAX_TOKENS,
-        )
+            "temperature": 0.1,
+        }
+        if REFLECTION_SUMMARY_MAX_TOKENS is not None:
+            kwargs["max_tokens"] = REFLECTION_SUMMARY_MAX_TOKENS
+        response = await client.chat.completions.create(**kwargs)
 
     raw = response.choices[0].message.content or ""
     summary = parse_json_response(raw)
