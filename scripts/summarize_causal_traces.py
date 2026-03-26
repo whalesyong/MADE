@@ -72,6 +72,26 @@ except ImportError:
 
 
 # ---------------------------------------------------------------------------
+# Global limits
+# ---------------------------------------------------------------------------
+
+TRAJECTORY_TOOL_ARGS_MAX_CHARS = 300
+TRAJECTORY_OBSERVATION_MAX_CHARS = 400
+
+STEP_CONTEXT_FIELD_MAX_CHARS = 1500
+STEP_REASONING_MAX_CHARS = 1000
+STEP_ANSWER_MAX_CHARS = 500
+STEP_TRAJECTORY_MAX_CHARS = 3000
+STEP_SUMMARY_MAX_TOKENS = 600
+
+REFLECTION_CONTEXT_OTHER_FIELD_MAX_CHARS = 1000
+REFLECTION_CONTEXT_EPISODE_TRAJECTORY_MAX_CHARS = 2500
+REFLECTION_PROMPT_CONTEXT_MAX_CHARS = 5000
+REFLECTION_PROMPT_TEXT_MAX_CHARS = 4000
+REFLECTION_SUMMARY_MAX_TOKENS = 500
+
+
+# ---------------------------------------------------------------------------
 # Prompt
 # ---------------------------------------------------------------------------
 
@@ -157,13 +177,13 @@ def format_trajectory(trajectory: dict) -> str:
         if tool:
             args_str = json.dumps(args, default=str)
             # Keep args brief
-            if len(args_str) > 300:
-                args_str = args_str[:297] + "..."
+            if len(args_str) > TRAJECTORY_TOOL_ARGS_MAX_CHARS:
+                args_str = args_str[: TRAJECTORY_TOOL_ARGS_MAX_CHARS - 3] + "..."
             lines.append(f"[Action {i + 1}] {tool}({args_str})")
         if obs:
             obs_str = str(obs)
-            if len(obs_str) > 400:
-                obs_str = obs_str[:397] + "..."
+            if len(obs_str) > TRAJECTORY_OBSERVATION_MAX_CHARS:
+                obs_str = obs_str[: TRAJECTORY_OBSERVATION_MAX_CHARS - 3] + "..."
             lines.append(f"[Observation {i + 1}] {obs_str}")
         i += 1
 
@@ -187,8 +207,8 @@ def build_context_fields(entry: dict) -> str:
                 val = fields.get(key, "")
                 if val and val.lower() not in ("none", "no evaluations yet.", ""):
                     # Truncate long histories
-                    if len(val) > 1500:
-                        val = val[:1497] + "..."
+                    if len(val) > STEP_CONTEXT_FIELD_MAX_CHARS:
+                        val = val[: STEP_CONTEXT_FIELD_MAX_CHARS - 3] + "..."
                     sections.append(f"[{key}]\n{val}")
             return "\n\n".join(sections)
 
@@ -219,7 +239,11 @@ def build_reflection_context_fields(entry: dict) -> str:
             val = fields.get(key, "")
             if val and val.lower() not in ("none", "none (this is the first episode).", ""):
                 # episode_trajectory can be very long; trim aggressively
-                max_len = 2500 if key == "episode_trajectory" else 1000
+                max_len = (
+                    REFLECTION_CONTEXT_EPISODE_TRAJECTORY_MAX_CHARS
+                    if key == "episode_trajectory"
+                    else REFLECTION_CONTEXT_OTHER_FIELD_MAX_CHARS
+                )
                 if len(val) > max_len:
                     val = val[: max_len - 3] + "..."
                 sections.append(f"[{key}]\n{val}")
@@ -242,6 +266,11 @@ def parse_json_response(raw: str) -> dict:
     """Parse model response as JSON, with fence-stripping and fallback."""
     text = raw.strip()
 
+    # Some models emit hidden reasoning wrapped in <think>...</think>.
+    # Keep only the content after the closing tag before JSON parsing.
+    if "</think>" in text:
+        text = text.split("</think>")[-1].strip()
+
     # Strip markdown fences if present
     if text.startswith("```"):
         text = re.sub(r"```(?:json)?\n?", "", text).strip("` \n")
@@ -249,6 +278,15 @@ def parse_json_response(raw: str) -> dict:
     try:
         return json.loads(text)
     except json.JSONDecodeError:
+        # Fallback: try to recover a JSON object embedded in extra text.
+        start = text.find("{")
+        end = text.rfind("}")
+        if start != -1 and end != -1 and end > start:
+            candidate = text[start : end + 1]
+            try:
+                return json.loads(candidate)
+            except json.JSONDecodeError:
+                pass
         return {"raw_text": text, "parse_error": True}
 
 
@@ -278,15 +316,15 @@ async def summarize_step(
     """Call the LLM to produce a causal summary for one orchestrator step."""
     output = entry.get("output", {})
     trajectory_text = format_trajectory(output.get("trajectory", {}))
-    reasoning = str(output.get("reasoning", ""))[:1000]
-    answer = str(output.get("answer", ""))[:500]
+    reasoning = str(output.get("reasoning", ""))[:STEP_REASONING_MAX_CHARS]
+    answer = str(output.get("answer", ""))[:STEP_ANSWER_MAX_CHARS]
     eval_count = entry.get("extra", {}).get("evaluation_history_len", 0)
     context_fields = build_context_fields(entry)
 
     user_msg = CAUSAL_SUMMARY_USER.format(
         eval_count=eval_count,
         context_fields=context_fields,
-        trajectory=trajectory_text[:3000],
+        trajectory=trajectory_text[:STEP_TRAJECTORY_MAX_CHARS],
         reasoning=reasoning,
         answer=answer,
     )
@@ -299,7 +337,7 @@ async def summarize_step(
                 {"role": "user", "content": user_msg},
             ],
             temperature=0.1,
-            max_tokens=600,
+            max_tokens=STEP_SUMMARY_MAX_TOKENS,
         )
 
     raw = response.choices[0].message.content or ""
@@ -325,8 +363,8 @@ async def summarize_reflection(
     context_fields = build_reflection_context_fields(entry)
 
     user_msg = REFLECTION_CAUSAL_USER.format(
-        context_fields=context_fields[:5000],
-        reflection=reflection_text[:4000],
+        context_fields=context_fields[:REFLECTION_PROMPT_CONTEXT_MAX_CHARS],
+        reflection=reflection_text[:REFLECTION_PROMPT_TEXT_MAX_CHARS],
     )
 
     async with semaphore:
@@ -337,7 +375,7 @@ async def summarize_reflection(
                 {"role": "user", "content": user_msg},
             ],
             temperature=0.1,
-            max_tokens=500,
+            max_tokens=REFLECTION_SUMMARY_MAX_TOKENS,
         )
 
     raw = response.choices[0].message.content or ""
