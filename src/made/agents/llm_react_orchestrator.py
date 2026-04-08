@@ -21,6 +21,8 @@ from collections import defaultdict
 from typing import Any
 import time, random
 import math
+import re as _re
+
 import dspy
 import numpy as np
 from pymatgen.analysis.phase_diagram import PDEntry, PhaseDiagram
@@ -35,7 +37,21 @@ from made.utils.llm_trace import append_llm_trace
 
 logger = logging.getLogger(__name__)
 
-import re as _re
+
+_THINK_RE = _re.compile(r"<think>.*?</think>", _re.DOTALL)
+
+
+def _strip_think_blocks(value: Any) -> Any:
+    """Recursively remove <think>...</think> blocks while preserving output shape."""
+    if isinstance(value, str):
+        return _THINK_RE.sub("", value).strip()
+    if isinstance(value, list):
+        return [_strip_think_blocks(v) for v in value]
+    if isinstance(value, tuple):
+        return tuple(_strip_think_blocks(v) for v in value)
+    if isinstance(value, dict):
+        return {k: _strip_think_blocks(v) for k, v in value.items()}
+    return value
 
 
 class _ThinkStrippedLM:
@@ -47,14 +63,16 @@ class _ThinkStrippedLM:
     "..." instead of the real content that follows </think>.
     """
 
-    _THINK_RE = _re.compile(r"<think>.*?</think>", _re.DOTALL)
-
     def __init__(self, lm: dspy.LM) -> None:
         self._lm = lm
 
     def __call__(self, *args, **kwargs):
         completions = self._lm(*args, **kwargs)
-        return [self._THINK_RE.sub("", c) for c in completions]
+        return _strip_think_blocks(completions)
+
+    async def acall(self, *args, **kwargs):
+        completions = await self._lm.acall(*args, **kwargs)
+        return _strip_think_blocks(completions)
 
     def __getattr__(self, name: str):
         return getattr(self._lm, name)
@@ -2108,7 +2126,7 @@ class LLMReActOrchestratorAgent(Agent):
                     episode_outcome=outcome,
                     prior_reflections=prior,
                 )
-            reflection = pred.reflection
+            reflection = _strip_think_blocks(pred.reflection)
 
             lm_call = lm.history[-1] if getattr(lm, "history", None) else None
             append_llm_trace(
@@ -2122,7 +2140,7 @@ class LLMReActOrchestratorAgent(Agent):
                 extra={"lm_call": lm_call},
             )
         except Exception as e:
-            logger.error(f"[Reflexion] Failed to generate reflection: {e}")
+            logger.exception(f"[Reflexion] Failed to generate reflection: {e}")
             return ""
 
         # Sliding window
