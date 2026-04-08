@@ -54,7 +54,7 @@ def _strip_think_blocks(value: Any) -> Any:
     return value
 
 
-class _ThinkStrippedLM:
+class _ThinkStrippedLM(dspy.BaseLM):
     """Wraps a DSPy LM and strips <think>...</think> blocks from completions
     before DSPy's output parser sees them.
 
@@ -63,7 +63,7 @@ class _ThinkStrippedLM:
     "..." instead of the real content that follows </think>.
     """
 
-    def __init__(self, lm: dspy.LM) -> None:
+    def __init__(self, lm: dspy.BaseLM) -> None:
         self._lm = lm
 
     def __call__(self, *args, **kwargs):
@@ -73,6 +73,9 @@ class _ThinkStrippedLM:
     async def acall(self, *args, **kwargs):
         completions = await self._lm.acall(*args, **kwargs)
         return _strip_think_blocks(completions)
+
+    def copy(self, **kwargs):
+        return _ThinkStrippedLM(self._lm.copy(**kwargs))
 
     def __getattr__(self, name: str):
         return getattr(self._lm, name)
