@@ -71,6 +71,7 @@ def run_single_baseline_experiment(
     initial_family_mode: str | None = None,
     initial_family_file: str = "./data/initial_family_prompts.json",
     parallel_systems: int = 1,
+    rollout_save_dir: str | None = None,
 ) -> Path:
     """
     Run a single baseline experiment.
@@ -90,6 +91,7 @@ def run_single_baseline_experiment(
         initial_family_mode: "hard" or "easy" to inject composition guidance in ep 0
         initial_family_file: Path to JSON with hard/easy families per system
         parallel_systems: Number of systems to run in parallel (local infra only, default 1)
+        rollout_save_dir: If set, save per-step rollout data for DPO to this directory
 
     Returns:
         Path to output directory
@@ -132,6 +134,9 @@ def run_single_baseline_experiment(
         config_overrides.append(f"experiment.initial_family_mode={initial_family_mode}")
         config_overrides.append(f"experiment.initial_family_file={initial_family_file}")
 
+    if rollout_save_dir is not None:
+        config_overrides.append(f"++experiment.rollout_save_dir={rollout_save_dir}")
+
     if seed is not None:
         config_overrides.append(f"experiment.seed={seed}")
 
@@ -152,6 +157,7 @@ def run_single_baseline_experiment(
         "enable_reflexion": enable_reflexion,
         "initial_family_mode": initial_family_mode,
         "initial_family_file": initial_family_file,
+        "rollout_save_dir": rollout_save_dir,
         "config_overrides": config_overrides,
     }
     with open(output_dir / "experiment_metadata.json", "w") as f:
@@ -272,6 +278,7 @@ def run_multiple_baseline_experiments(
     initial_family_mode: str | None = None,
     initial_family_file: str = "./data/initial_family_prompts.json",
     parallel_systems: int = 1,
+    rollout_save_dir: str | None = None,
 ) -> dict[str, Path | None]:
     """
     Run multiple baseline experiments.
@@ -290,6 +297,7 @@ def run_multiple_baseline_experiments(
         wandb_tags: List of wandb tags
         continue_on_error: If True, continue with remaining experiments on error
         parallel_systems: Number of systems to run in parallel (local infra only)
+        rollout_save_dir: If set, save per-step rollout data for DPO to this directory
 
     Returns:
         Dictionary mapping agent_config -> output_dir (or None if failed)
@@ -317,6 +325,7 @@ def run_multiple_baseline_experiments(
                 max_stoichiometry=max_stoichiometry,
                 stability_tolerance=stability_tolerance,
                 use_wandb=use_wandb,
+                rollout_save_dir=rollout_save_dir,
                 wandb_project=wandb_project,
                 wandb_tags=wandb_tags,
                 resume=resume,
@@ -470,6 +479,16 @@ def main():
             "this to the number of available CPU/GPU slots."
         ),
     )
+    parser.add_argument(
+        "--rollout-save-dir",
+        type=str,
+        default=None,
+        help=(
+            "If set, save per-step rollout data (pre-step env state + action + post-step obs) "
+            "for DPO preference learning to this directory. "
+            "Files are written as: <dir>/<system_id>/episode_<N>.jsonl"
+        ),
+    )
 
     args = parser.parse_args()
 
@@ -510,6 +529,7 @@ def main():
         initial_family_mode=args.initial_family_mode,
         initial_family_file=args.initial_family_file,
         parallel_systems=args.parallel_systems,
+        rollout_save_dir=args.rollout_save_dir,
     )
 
     # Print summary

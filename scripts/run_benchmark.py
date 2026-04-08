@@ -387,6 +387,20 @@ def run_episode_local(
 
 
     
+    # Configure rollout saving if requested.
+    # Each step is appended as one JSONL line to:
+    #   <rollout_save_dir>/<system_id>/episode_<N>.jsonl
+    rollout_save_dir_cfg = OmegaConf.select(config, "experiment.rollout_save_dir", default=None)
+    rollout_file: Path | None = None
+    if rollout_save_dir_cfg:
+        rollout_root = Path(rollout_save_dir_cfg)
+        if system_id:
+            rollout_file = rollout_root / system_id / f"episode_{episode_id:03d}.jsonl"
+        else:
+            rollout_file = rollout_root / f"episode_{episode_id:03d}.jsonl"
+        rollout_file.parent.mkdir(parents=True, exist_ok=True)
+        logger.info(f"Rollout data will be saved to {rollout_file}")
+
     results = {
         "metrics": {},
         "trajectory": [],
@@ -420,6 +434,24 @@ def run_episode_local(
             state = env.get_state()
             _, struct = agent(state)
             obs, _ = env.step(struct)
+            # Save pre-step env state + action + post-step obs for DPO rollouts.
+            if rollout_file is not None:
+                # Serialize obs: proposal Structure is not yet converted at this point
+                obs_serializable = {
+                    k: (v.as_dict() if isinstance(v, Structure) else v)
+                    for k, v in obs.items()
+                }
+                rollout_record = {
+                    "step": query_count,
+                    "episode_id": episode_id,
+                    "system_id": system_id,
+                    "pre_step_env_state": state,
+                    "action": struct.as_dict(),
+                    "post_step_obs": obs_serializable,
+                    "metrics": env.get_latest_metrics(),
+                }
+                with rollout_file.open("a", encoding="utf-8") as _rf:
+                    _rf.write(json.dumps(rollout_record, ensure_ascii=False) + "\n")
             agent_behavior_metrics = {}
             if hasattr(agent, "get_latest_behavior_metrics"):
                 # Consume latest oracle observation immediately so behavior metrics

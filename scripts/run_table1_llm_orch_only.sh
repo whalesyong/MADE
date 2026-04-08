@@ -29,6 +29,7 @@ set -euo pipefail
 #   RUN_PROFILE=fast bash scripts/run_table1_llm_orch_only.sh
 #   PARALLEL_SYSTEM_RUNS=3 bash scripts/run_table1_llm_orch_only.sh
 #   NUM_PARALLEL_SYSTEMS=4 bash scripts/run_table1_llm_orch_only.sh
+#   ROLLOUT_SAVE_DIR=./rollout_data bash scripts/run_table1_llm_orch_only.sh
 #
 # Optional preflight controls:
 #   CHECK_LLM_BACKEND=0                  # skip endpoint check
@@ -75,6 +76,7 @@ OUTPUT_DIR="${OUTPUT_DIR:-./results/baselines}"
 MAX_STOICHIOMETRY="${MAX_STOICHIOMETRY:-20}"
 PARALLEL_SYSTEM_RUNS="${PARALLEL_SYSTEM_RUNS:-1}"   # 1 = sequential, 2/3 = concurrent (across system files)
 NUM_PARALLEL_SYSTEMS="${NUM_PARALLEL_SYSTEMS:-1}"   # systems to run in parallel within each file
+ROLLOUT_SAVE_DIR="${ROLLOUT_SAVE_DIR:-}"            # if set, save per-step rollout data for DPO
 
 if ! [[ "${PARALLEL_SYSTEM_RUNS}" =~ ^[0-9]+$ ]] || (( PARALLEL_SYSTEM_RUNS < 1 || PARALLEL_SYSTEM_RUNS > 3 )); then
   echo "ERROR: PARALLEL_SYSTEM_RUNS must be an integer in [1, 3]"
@@ -209,6 +211,7 @@ echo "  Resume flag: ${RESUME_FLAG}"
 echo "  Stop-on-error: ${STOP_ON_ERROR_FLAG:-off}"
 echo "  Reflexion: ${REFLEXION_FLAG:-off}"
 echo "  Initial family mode: ${INITIAL_FAMILY_MODE:-off}"
+echo "  Rollout save dir: ${ROLLOUT_SAVE_DIR:-off}"
 echo
 
 run_one_system_file() {
@@ -245,6 +248,9 @@ run_one_system_file() {
   fi
   if [[ -n "${INITIAL_FAMILY_FLAGS}" ]]; then
     cmd+=(${INITIAL_FAMILY_FLAGS})
+  fi
+  if [[ -n "${ROLLOUT_SAVE_DIR}" ]]; then
+    cmd+=(--rollout-save-dir "${ROLLOUT_SAVE_DIR}")
   fi
 
   "${cmd[@]}"

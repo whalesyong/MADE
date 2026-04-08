@@ -26,6 +26,10 @@ experiment:
   # Set to "hard" or "easy" to inject composition guidance; null = disabled
   initial_family_mode: null
   initial_family_file: ./data/initial_family_prompts.json
+  # If set, save per-step rollout data (pre-step env state + action + post-step obs)
+  # to this directory for use in DPO preference learning.
+  # Files are written as: <rollout_save_dir>/<system_id>/episode_<N>.jsonl
+  rollout_save_dir: null
 
 hydra:
   run:

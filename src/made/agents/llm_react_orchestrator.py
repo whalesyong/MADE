@@ -35,6 +35,30 @@ from made.utils.llm_trace import append_llm_trace
 
 logger = logging.getLogger(__name__)
 
+import re as _re
+
+
+class _ThinkStrippedLM:
+    """Wraps a DSPy LM and strips <think>...</think> blocks from completions
+    before DSPy's output parser sees them.
+
+    Without this, reasoning models that write the DSPy format template inside
+    their <think> block (as a planning step) cause DSPy to parse the placeholder
+    "..." instead of the real content that follows </think>.
+    """
+
+    _THINK_RE = _re.compile(r"<think>.*?</think>", _re.DOTALL)
+
+    def __init__(self, lm: dspy.LM) -> None:
+        self._lm = lm
+
+    def __call__(self, *args, **kwargs):
+        completions = self._lm(*args, **kwargs)
+        return [self._THINK_RE.sub("", c) for c in completions]
+
+    def __getattr__(self, name: str):
+        return getattr(self._lm, name)
+
 
 # ============================================================================
 # DSPy Signature for ReAct Orchestration (default, can be overridden via config)
@@ -115,10 +139,16 @@ class SelfReflectionSignature(dspy.Signature):
     - Concrete strategy changes for the next episode
 
     Metric interpretation guardrails:
-    - "NOVEL" is local structural novelty within this run: not matching MP-database initial structures, 
-    and not matching previously discovered structures in this episode.
-    - "Recall" is recovery of ground-truth stable formulas missing at initialization.
+    - "e_above_hull": distance above the convex hull in eV/atom. 0.0 means on the hull (thermodynamically stable). Values of inf indicate a failed oracle evaluation, not a meaningful energy.
+    - "STABLE": e_above_hull <= stability_tolerance. "METASTABLE": within tolerance but not exactly on the hull — treat as a success. "NOVEL": locally new in this run, not matching any initial MP structures or prior discoveries in this episode.
+    - "Novel stable structures found": count of structures that are both stable and locally novel. This is the primary success metric.
+    - "Recall": fraction of ground-truth stable formulas (missing at initialization) that were recovered. If recall_num/recall_den = 0/0, the denominator is zero — all ground-truth phases were already present at initialization, so recall is vacuous for this run, not a system fault.
     - Novel counts and recall can diverge; do not assume "high novel + low recall" implies a bug.
+
+    Actionability constraint:
+    - The agent's only levers are: which compositions to generate, how many queries to allocate per composition, and which stoichiometric regions to prioritise.
+    - Do NOT recommend actions the agent cannot take: debugging metrics, investigating system faults, querying external databases, or checking initialization state.
+    - If a metric is N/A or undefined (e.g. recall denominator is 0), acknowledge it briefly and move on — do not treat it as a problem to solve.
 
     Be specific and concise. Write 3-5 bullet points. Avoid vague advice like "explore more".
     """
@@ -2071,22 +2101,15 @@ class LLMReActOrchestratorAgent(Agent):
 
         try:
             lm = build_dspy_lm(self.llm_config)
-            with dspy.context(lm=lm):
+            with dspy.context(lm=_ThinkStrippedLM(lm)):
                 pred = self.self_reflection_module(
                     chemical_system=", ".join(self.chemical_system_elements),
                     episode_trajectory=episode_summary,
                     episode_outcome=outcome,
                     prior_reflections=prior,
                 )
-            raw_reflection = pred.reflection
+            reflection = pred.reflection
 
-            # parsing logic here to strip the </think> part, so that DSPy parses cleanly
-            
-            if "</think>" in raw_reflection:
-                reflection = raw_reflection.split("</think>", 1)[1]
-            else:
-                reflection = raw_reflection
-            
             lm_call = lm.history[-1] if getattr(lm, "history", None) else None
             append_llm_trace(
                 component="self_reflection",

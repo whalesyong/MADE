@@ -17,7 +17,7 @@ llm_config:
   cache: false  # cache responses in dspy
   extra_kwargs: {}
   trace_outputs: true         # enable JSONL tracing
-  trace_inputs: false         # set true if you also want input metadata
+  trace_inputs: true          # set true if you also want input metadata
   trace_file: null            # null => ./llm_traces.jsonl or $MADE_LLM_TRACE_PATH
 
 
