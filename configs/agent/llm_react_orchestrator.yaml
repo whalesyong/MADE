@@ -43,13 +43,13 @@ uniqueness_filter:
   primitive_cell: true
 
 
-# LLM configuration for DSPy
+# LLM configuration for DSPy (actor / orchestrator)
 llm_config:
   # Change this string to swap orchestrator models (served by vLLM).
   # Format should remain provider-prefixed for DSPy/LiteLLM compatibility.
   # Example: openai/Qwen/Qwen2.5-32B-Instruct
   model: ${oc.env:MODEL_STR,openai/Qwen/Qwen3-30B-A3B-Instruct-2507-FP8}
-  base_url: http://127.0.0.1:${oc.env:VLLM_PORT,8000}/v1
+  base_url: http://127.0.0.1:${oc.env:VLLM_ACTPORT,8000}/v1
   # Env var containing the vLLM API key (set to your --api-key value)
   api_key_env: "VLLM_API_KEY"
   cache: false
@@ -60,6 +60,21 @@ llm_config:
   trace_outputs: true         # enable JSONL tracing
   trace_inputs: true          # set true if you also want input metadata
   trace_file: null            # null => ./llm_traces.jsonl or $MADE_LLM_TRACE_PATH
+
+# LLM configuration for the self-reflection (reflexion) model.
+# Set VLLM_REFPORT to point at a separate vLLM instance.
+# If omitted entirely (null), the agent falls back to llm_config above.
+reflector_llm_config:
+  model: ${oc.env:REFLECTOR_MODEL_STR,openai/Qwen/Qwen3-30B-A3B-Instruct-2507-FP8}
+  base_url: http://127.0.0.1:${oc.env:VLLM_REFPORT,8000}/v1
+  api_key_env: "VLLM_API_KEY"
+  cache: false
+  max_output_tokens: null
+  temperature: null
+  extra_kwargs: {}
+  trace_outputs: true
+  trace_inputs: true
+  trace_file: null
 
 # Context configuration with customizable prompts
 context_config:

@@ -42,9 +42,21 @@ _THINK_RE = _re.compile(r"<think>.*?</think>", _re.DOTALL)
 
 
 def _strip_think_blocks(value: Any) -> Any:
-    """Recursively remove <think>...</think> blocks while preserving output shape."""
+    """Recursively remove <think>...</think> blocks while preserving output shape.
+
+    Also handles the case where a reasoning model emits a closing </think>
+    without a matching opener: everything before the first </think> is treated
+    as an unwrapped think block and stripped. This is what Qwen3.5-122B does —
+    it writes its planning (including literal DSPy field templates with "..."
+    placeholders) as free text, then emits a lone </think> before the real
+    output. Without this, DSPy's ChatAdapter parses the first template
+    occurrence and returns "..." as the field value.
+    """
     if isinstance(value, str):
-        return _THINK_RE.sub("", value).strip()
+        s = value
+        if "</think>" in s and "<think>" not in s:
+            s = "<think>" + s
+        return _THINK_RE.sub("", s).strip()
     if isinstance(value, list):
         return [_strip_think_blocks(v) for v in value]
     if isinstance(value, tuple):
@@ -982,6 +994,7 @@ class LLMReActOrchestratorAgent(Agent):
         self,
         # LLM configuration
         llm_config: dict[str, Any] | None = None,
+        reflector_llm_config: dict[str, Any] | None = None,
         # Tool components
         generators: dict[str, Generator] | None = None,
         static_filters: Filter | None = None,  # FilterChain or single filter
@@ -1006,7 +1019,9 @@ class LLMReActOrchestratorAgent(Agent):
         Initialize the LLM ReAct Orchestrator Agent.
 
         Args:
-            llm_config: DSPy LM configuration (model, cache, etc.)
+            llm_config: DSPy LM configuration for the actor/orchestrator (model, cache, etc.)
+            reflector_llm_config: DSPy LM configuration for the self-reflection model.
+                If None, falls back to llm_config.
             generators: Dict of named generators
             static_filters: Filter or FilterChain for static filtering (cached)
             uniqueness_filter: Uniqueness filter (always re-run)
@@ -1114,6 +1129,8 @@ class LLMReActOrchestratorAgent(Agent):
 
         # Initialize DSPy LM
         self.llm_config = llm_config or {}
+        # Reflector uses its own config if provided, otherwise falls back to actor config.
+        self.reflector_llm_config = reflector_llm_config if reflector_llm_config else self.llm_config
         self._setup_dspy()
 
         # Prepare signature with optional prompt override (mirrors LLMScorer/LLMPlanner approach)
@@ -1137,10 +1154,21 @@ class LLMReActOrchestratorAgent(Agent):
             base_url = self.llm_config.get("base_url") or self.llm_config.get("api_base")
             if base_url:
                 logger.info(
-                    f"[LLMReActOrchestrator] DSPy LM: {model} (api_base={base_url})"
+                    f"[LLMReActOrchestrator] Actor DSPy LM: {model} (api_base={base_url})"
                 )
             else:
-                logger.info(f"[LLMReActOrchestrator] DSPy LM: {model}")
+                logger.info(f"[LLMReActOrchestrator] Actor DSPy LM: {model}")
+
+            ref_model = self.reflector_llm_config.get("model", "unknown")
+            ref_base_url = self.reflector_llm_config.get("base_url") or self.reflector_llm_config.get("api_base")
+            if self.reflector_llm_config is self.llm_config:
+                logger.info("[LLMReActOrchestrator] Reflector DSPy LM: same as actor")
+            elif ref_base_url:
+                logger.info(
+                    f"[LLMReActOrchestrator] Reflector DSPy LM: {ref_model} (api_base={ref_base_url})"
+                )
+            else:
+                logger.info(f"[LLMReActOrchestrator] Reflector DSPy LM: {ref_model}")
         except Exception as e:
             logger.error(f"[LLMReActOrchestrator] Failed to initialize DSPy LM: {e}")
             raise
@@ -2121,7 +2149,7 @@ class LLMReActOrchestratorAgent(Agent):
         )
 
         try:
-            lm = build_dspy_lm(self.llm_config)
+            lm = build_dspy_lm(self.reflector_llm_config)
             with dspy.context(lm=_ThinkStrippedLM(lm)):
                 pred = self.self_reflection_module(
                     chemical_system=", ".join(self.chemical_system_elements),
@@ -2134,7 +2162,7 @@ class LLMReActOrchestratorAgent(Agent):
             lm_call = lm.history[-1] if getattr(lm, "history", None) else None
             append_llm_trace(
                 component="self_reflection",
-                llm_config=self.llm_config,
+                llm_config=self.reflector_llm_config,
                 output={"reflection": reflection},
                 inputs={
                     "chemical_system": self.chemical_system_elements,

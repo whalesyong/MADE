@@ -20,6 +20,10 @@ experiment:
   systems: []
   # Alternatively, provide a JSON file containing [[El, El, ...], ...]
   systems_file: null
+  # List of system IDs to exclude (e.g., ["Au-K-Tb", "Mg-Sn-Sr"])
+  exclude_systems: []
+  # If true, skip systems that already have a summary.json in the output directory
+  resume: false
   # If set, limit the number of systems loaded from systems_file/systems
   max_systems: 5
   # Initial family prompt injection for episode 0

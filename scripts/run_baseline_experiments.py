@@ -67,6 +67,7 @@ def run_single_baseline_experiment(
     wandb_project: str = "made-baselines",
     wandb_tags: list[str] | None = None,
     resume: bool = True,
+    exclude_systems: list[str] | None = None,
     enable_reflexion: bool = False,
     initial_family_mode: str | None = None,
     initial_family_file: str = "./data/initial_family_prompts.json",
@@ -128,7 +129,13 @@ def run_single_baseline_experiment(
         f"++agent.enable_reflexion={str(enable_reflexion).lower()}",
         # within-file system parallelism
         f"++experiment.num_parallel_systems={parallel_systems}",
+        # resume and exclude
+        f"experiment.resume={str(resume).lower()}",
     ]
+
+    if exclude_systems:
+        exclude_str = ",".join(exclude_systems)
+        config_overrides.append(f"experiment.exclude_systems=[{exclude_str}]")
 
     if initial_family_mode:
         config_overrides.append(f"experiment.initial_family_mode={initial_family_mode}")
@@ -274,6 +281,7 @@ def run_multiple_baseline_experiments(
     wandb_tags: list[str] | None = None,
     continue_on_error: bool = True,
     resume: bool = True,
+    exclude_systems: list[str] | None = None,
     enable_reflexion: bool = False,
     initial_family_mode: str | None = None,
     initial_family_file: str = "./data/initial_family_prompts.json",
@@ -329,6 +337,7 @@ def run_multiple_baseline_experiments(
                 wandb_project=wandb_project,
                 wandb_tags=wandb_tags,
                 resume=resume,
+                exclude_systems=exclude_systems,
                 enable_reflexion=enable_reflexion,
                 initial_family_mode=initial_family_mode,
                 initial_family_file=initial_family_file,
@@ -444,6 +453,12 @@ def main():
         help="Do not resume from existing results",
     )
     parser.add_argument(
+        "--exclude-systems",
+        nargs="+",
+        default=None,
+        help="List of system IDs to exclude (e.g., Au-K-Tb Mg-Sn-Sr)",
+    )
+    parser.add_argument(
         "--reflexion",
         action="store_true",
         default=False,
@@ -525,6 +540,7 @@ def main():
         wandb_tags=args.wandb_tags,
         continue_on_error=not args.stop_on_error,
         resume=args.resume,
+        exclude_systems=args.exclude_systems,
         enable_reflexion=args.reflexion,
         initial_family_mode=args.initial_family_mode,
         initial_family_file=args.initial_family_file,

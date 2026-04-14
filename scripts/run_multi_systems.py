@@ -171,6 +171,12 @@ def run_multi_systems(config: DictConfig) -> None:
     else:
         systems = [list(s) for s in config.experiment.get("systems", [])]
 
+    # Optional exclude systems
+    exclude_systems = config.experiment.get("exclude_systems", [])
+    if exclude_systems:
+        systems = [s for s in systems if "-".join(s) not in exclude_systems]
+        logger.info(f"Excluded systems: {exclude_systems}")
+
     # Optional cap on number of systems
     max_systems = config.experiment.get("max_systems", None)
     if max_systems is not None:
@@ -187,6 +193,8 @@ def run_multi_systems(config: DictConfig) -> None:
     all_episodes_across_systems: list[dict[str, Any]] = []
     per_system_summaries: dict[str, dict[str, dict[str, float]]] = {}
 
+    resume = config.experiment.get("resume", False)
+
     # Pre-build per-system configs and directories
     system_setups: list[tuple[str, DictConfig, Path, Path]] = []
     for elements in systems:
@@ -194,11 +202,22 @@ def run_multi_systems(config: DictConfig) -> None:
         cfg_sys = OmegaConf.create(OmegaConf.to_container(config, resolve=False))
         cfg_sys.dataset.elements = list(elements)
         system_dir = systems_dir / system_id
+        
+        # Check if already completed if resume is enabled
+        summary_file = system_dir / "summary" / "summary.json"
+        if resume and summary_file.exists():
+            logger.info(f"System {system_id} already completed, skipping.")
+            continue
+
         trajectories_dir = system_dir / "trajectories"
         summary_dir = system_dir / "summary"
         trajectories_dir.mkdir(parents=True, exist_ok=True)
         summary_dir.mkdir(parents=True, exist_ok=True)
         system_setups.append((system_id, cfg_sys, trajectories_dir, summary_dir))
+
+    if not system_setups:
+        logger.info("All systems already completed or excluded. Exiting.")
+        return
 
     # Accumulate per-system metrics (full results are written to disk immediately)
     per_system_metrics: dict[str, list[dict[str, Any]]] = {

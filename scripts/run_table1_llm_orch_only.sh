@@ -21,6 +21,7 @@ set -euo pipefail
 #
 # Useful overrides:
 #   RESUME=1 bash scripts/run_table1_llm_orch_only.sh
+#   EXCLUDE_SYSTEMS="Au-K-Tb Mg-Sn-Sr" bash scripts/run_table1_llm_orch_only.sh
 #   INFRA=modal bash scripts/run_table1_llm_orch_only.sh
 #   OUTPUT_DIR=./results/baselines_llm_orch bash scripts/run_table1_llm_orch_only.sh
 #   REFLEXION=1 bash scripts/run_table1_llm_orch_only.sh
@@ -113,6 +114,13 @@ if [[ "${RESUME:-0}" == "1" ]]; then
   RESUME_FLAG="--resume"
 else
   RESUME_FLAG="--no-resume"
+fi
+
+# EXCLUDE_SYSTEMS="Au-K-Tb Mg-Sn-Sr" -> --exclude-systems Au-K-Tb Mg-Sn-Sr
+EXCLUDE_SYSTEMS="${EXCLUDE_SYSTEMS:-}"
+EXCLUDE_SYSTEMS_FLAG=""
+if [[ -n "${EXCLUDE_SYSTEMS}" ]]; then
+  EXCLUDE_SYSTEMS_FLAG="--exclude-systems ${EXCLUDE_SYSTEMS}"
 fi
 
 # LLM backend preflight checks.
@@ -240,6 +248,9 @@ run_one_system_file() {
     "${RESUME_FLAG}"
   )
 
+  if [[ -n "${EXCLUDE_SYSTEMS_FLAG}" ]]; then
+    cmd+=(${EXCLUDE_SYSTEMS_FLAG})
+  fi
   if [[ -n "${STOP_ON_ERROR_FLAG}" ]]; then
     cmd+=("${STOP_ON_ERROR_FLAG}")
   fi
