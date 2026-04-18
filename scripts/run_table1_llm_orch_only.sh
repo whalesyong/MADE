@@ -31,6 +31,8 @@ set -euo pipefail
 #   PARALLEL_SYSTEM_RUNS=3 bash scripts/run_table1_llm_orch_only.sh
 #   NUM_PARALLEL_SYSTEMS=4 bash scripts/run_table1_llm_orch_only.sh
 #   ROLLOUT_SAVE_DIR=./rollout_data bash scripts/run_table1_llm_orch_only.sh
+#   ROLLOUT_SAVE_DIR=./rollout_data ROLLOUT_SAVE_FULL_STATE=1 bash scripts/run_table1_llm_orch_only.sh
+#   ROLLOUT_SAVE_DIR=./rollout_data INITIAL_NUM_SEED_COMPOUNDS=5 bash scripts/run_table1_llm_orch_only.sh
 #
 # Optional preflight controls:
 #   CHECK_LLM_BACKEND=0                  # skip endpoint check
@@ -78,6 +80,17 @@ MAX_STOICHIOMETRY="${MAX_STOICHIOMETRY:-20}"
 PARALLEL_SYSTEM_RUNS="${PARALLEL_SYSTEM_RUNS:-1}"   # 1 = sequential, 2/3 = concurrent (across system files)
 NUM_PARALLEL_SYSTEMS="${NUM_PARALLEL_SYSTEMS:-1}"   # systems to run in parallel within each file
 ROLLOUT_SAVE_DIR="${ROLLOUT_SAVE_DIR:-}"            # if set, save per-step rollout data for DPO
+ROLLOUT_SAVE_FULL_STATE="${ROLLOUT_SAVE_FULL_STATE:-0}"  # if 1, include proposed/newly_discovered entries for counterfactual rollouts
+
+if [[ -n "${ROLLOUT_SAVE_DIR}" ]]; then
+  DATA_COLLECTION_ENABLED=1
+  INITIAL_NUM_SEED_COMPOUNDS="${INITIAL_NUM_SEED_COMPOUNDS:-5}"
+  STARTING_SEED_BASE="${STARTING_SEED_BASE:-0}"
+else
+  DATA_COLLECTION_ENABLED=0
+  INITIAL_NUM_SEED_COMPOUNDS="${INITIAL_NUM_SEED_COMPOUNDS:-0}"
+  STARTING_SEED_BASE="${STARTING_SEED_BASE:-0}"
+fi
 
 if ! [[ "${PARALLEL_SYSTEM_RUNS}" =~ ^[0-9]+$ ]] || (( PARALLEL_SYSTEM_RUNS < 1 || PARALLEL_SYSTEM_RUNS > 3 )); then
   echo "ERROR: PARALLEL_SYSTEM_RUNS must be an integer in [1, 3]"
@@ -220,6 +233,10 @@ echo "  Stop-on-error: ${STOP_ON_ERROR_FLAG:-off}"
 echo "  Reflexion: ${REFLEXION_FLAG:-off}"
 echo "  Initial family mode: ${INITIAL_FAMILY_MODE:-off}"
 echo "  Rollout save dir: ${ROLLOUT_SAVE_DIR:-off}"
+echo "  Rollout full state: $( [[ "${ROLLOUT_SAVE_FULL_STATE}" == "1" ]] && echo on || echo off )"
+echo "  Data collection mode: $( [[ "${DATA_COLLECTION_ENABLED}" == "1" ]] && echo on || echo off )"
+echo "  Initial seeded compounds: ${INITIAL_NUM_SEED_COMPOUNDS}"
+echo "  Starting seed base: ${STARTING_SEED_BASE}"
 echo
 
 run_one_system_file() {
@@ -262,6 +279,14 @@ run_one_system_file() {
   fi
   if [[ -n "${ROLLOUT_SAVE_DIR}" ]]; then
     cmd+=(--rollout-save-dir "${ROLLOUT_SAVE_DIR}")
+  fi
+  if [[ "${ROLLOUT_SAVE_FULL_STATE}" == "1" ]]; then
+    cmd+=(--rollout-save-full-state)
+  fi
+  if [[ "${DATA_COLLECTION_ENABLED}" == "1" ]]; then
+    cmd+=(--initial-num-seed-compounds "${INITIAL_NUM_SEED_COMPOUNDS}")
+    cmd+=(--vary-starting-seed-per-episode)
+    cmd+=(--starting-seed-base "${STARTING_SEED_BASE}")
   fi
 
   "${cmd[@]}"

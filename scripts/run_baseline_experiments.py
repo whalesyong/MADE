@@ -73,6 +73,10 @@ def run_single_baseline_experiment(
     initial_family_file: str = "./data/initial_family_prompts.json",
     parallel_systems: int = 1,
     rollout_save_dir: str | None = None,
+    rollout_save_full_state: bool = False,
+    initial_num_seed_compounds: int = 0,
+    vary_starting_seed_per_episode: bool = False,
+    starting_seed_base: int = 0,
 ) -> Path:
     """
     Run a single baseline experiment.
@@ -93,6 +97,11 @@ def run_single_baseline_experiment(
         initial_family_file: Path to JSON with hard/easy families per system
         parallel_systems: Number of systems to run in parallel (local infra only, default 1)
         rollout_save_dir: If set, save per-step rollout data for DPO to this directory
+        rollout_save_full_state: If True, include proposed_entries and newly_discovered_entries
+            in pre_step_env_state for counterfactual rollouts (requires rollout_save_dir)
+        initial_num_seed_compounds: Number of deterministic starting compound compositions
+        vary_starting_seed_per_episode: If True, use a different starting seed per episode
+        starting_seed_base: Base numeric seed for per-episode starting seed variation
 
     Returns:
         Path to output directory
@@ -144,6 +153,18 @@ def run_single_baseline_experiment(
     if rollout_save_dir is not None:
         config_overrides.append(f"++experiment.rollout_save_dir={rollout_save_dir}")
 
+    if rollout_save_full_state:
+        config_overrides.append("++experiment.rollout_save_full_state=true")
+
+    if initial_num_seed_compounds > 0:
+        config_overrides.append(
+            f"environment.initial_num_seed_compounds={initial_num_seed_compounds}"
+        )
+
+    if vary_starting_seed_per_episode:
+        config_overrides.append("++experiment.vary_starting_seed_per_episode=true")
+        config_overrides.append(f"++experiment.starting_seed_base={starting_seed_base}")
+
     if seed is not None:
         config_overrides.append(f"experiment.seed={seed}")
 
@@ -165,6 +186,10 @@ def run_single_baseline_experiment(
         "initial_family_mode": initial_family_mode,
         "initial_family_file": initial_family_file,
         "rollout_save_dir": rollout_save_dir,
+        "rollout_save_full_state": rollout_save_full_state,
+        "initial_num_seed_compounds": initial_num_seed_compounds,
+        "vary_starting_seed_per_episode": vary_starting_seed_per_episode,
+        "starting_seed_base": starting_seed_base,
         "config_overrides": config_overrides,
     }
     with open(output_dir / "experiment_metadata.json", "w") as f:
@@ -287,6 +312,10 @@ def run_multiple_baseline_experiments(
     initial_family_file: str = "./data/initial_family_prompts.json",
     parallel_systems: int = 1,
     rollout_save_dir: str | None = None,
+    rollout_save_full_state: bool = False,
+    initial_num_seed_compounds: int = 0,
+    vary_starting_seed_per_episode: bool = False,
+    starting_seed_base: int = 0,
 ) -> dict[str, Path | None]:
     """
     Run multiple baseline experiments.
@@ -306,6 +335,11 @@ def run_multiple_baseline_experiments(
         continue_on_error: If True, continue with remaining experiments on error
         parallel_systems: Number of systems to run in parallel (local infra only)
         rollout_save_dir: If set, save per-step rollout data for DPO to this directory
+        rollout_save_full_state: If True, include proposed_entries and newly_discovered_entries
+            in pre_step_env_state for counterfactual rollouts (requires rollout_save_dir)
+        initial_num_seed_compounds: Number of deterministic starting compound compositions
+        vary_starting_seed_per_episode: If True, use a different starting seed per episode
+        starting_seed_base: Base numeric seed for per-episode starting seed variation
 
     Returns:
         Dictionary mapping agent_config -> output_dir (or None if failed)
@@ -334,6 +368,10 @@ def run_multiple_baseline_experiments(
                 stability_tolerance=stability_tolerance,
                 use_wandb=use_wandb,
                 rollout_save_dir=rollout_save_dir,
+                rollout_save_full_state=rollout_save_full_state,
+                initial_num_seed_compounds=initial_num_seed_compounds,
+                vary_starting_seed_per_episode=vary_starting_seed_per_episode,
+                starting_seed_base=starting_seed_base,
                 wandb_project=wandb_project,
                 wandb_tags=wandb_tags,
                 resume=resume,
@@ -504,6 +542,43 @@ def main():
             "Files are written as: <dir>/<system_id>/episode_<N>.jsonl"
         ),
     )
+    parser.add_argument(
+        "--rollout-save-full-state",
+        action="store_true",
+        default=False,
+        help=(
+            "If set (alongside --rollout-save-dir), include proposed_entries and "
+            "newly_discovered_entries in pre_step_env_state so counterfactual rollouts "
+            "can be performed from any timestep t without replaying the episode."
+        ),
+    )
+    parser.add_argument(
+        "--initial-num-seed-compounds",
+        type=int,
+        default=0,
+        help=(
+            "Number of deterministic starting compound compositions to include in the "
+            "initial observed phase diagram (default: 0 = disabled)."
+        ),
+    )
+    parser.add_argument(
+        "--vary-starting-seed-per-episode",
+        action="store_true",
+        default=False,
+        help=(
+            "If set, use a different deterministic starting seed for each episode "
+            "of the same system."
+        ),
+    )
+    parser.add_argument(
+        "--starting-seed-base",
+        type=int,
+        default=0,
+        help=(
+            "Base numeric seed used when --vary-starting-seed-per-episode is enabled "
+            "(episode seed = base + episode_id)."
+        ),
+    )
 
     args = parser.parse_args()
 
@@ -546,6 +621,10 @@ def main():
         initial_family_file=args.initial_family_file,
         parallel_systems=args.parallel_systems,
         rollout_save_dir=args.rollout_save_dir,
+        rollout_save_full_state=args.rollout_save_full_state,
+        initial_num_seed_compounds=args.initial_num_seed_compounds,
+        vary_starting_seed_per_episode=args.vary_starting_seed_per_episode,
+        starting_seed_base=args.starting_seed_base,
     )
 
     # Print summary

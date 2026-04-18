@@ -21,7 +21,10 @@ filtered ground truth, not the raw dataset. This allows the same dataset to be
 reused for different discovery task difficulties.
 """
 
+import hashlib
+import json
 import logging
+import random
 from typing import Any
 
 import matplotlib.pyplot as plt
@@ -65,6 +68,12 @@ class ConvexHullEnvironment(Environment):
         oracle: Oracle for energy evaluation
         start_with_all_stable: If True, start with all stable entries re-evaluated by oracle.
                               If False, start with elemental references only (default)
+        initial_num_seed_compounds: Number of stable compound compositions to add to the
+                           initial observed PD on top of the elemental references. When
+                           greater than 0, initialization uses a deterministic seeded
+                           subset instead of the two legacy modes above.
+        initial_compound_seed: Numeric seed used to choose the deterministic subset of
+                           initial compound compositions for a given chemical system.
         compute_elemental_from_oracle: If True, compute elemental reference energies
                                      using oracle from dataset structures (default)
         stability_tolerance: Energy tolerance (eV/atom) for considering a phase stable
@@ -89,6 +98,8 @@ class ConvexHullEnvironment(Environment):
         oracle: Oracle,
         budget: int,
         start_with_all_stable: bool = False,
+        initial_num_seed_compounds: int = 0,
+        initial_compound_seed: int | None = None,
         compute_elemental_from_oracle: bool = True,
         stability_tolerance: float = 1e-8,
         include_near_stable_from_ground_truth: bool = False,
@@ -107,6 +118,12 @@ class ConvexHullEnvironment(Environment):
             )
 
         self.start_with_all_stable = start_with_all_stable
+        self.initial_num_seed_compounds = int(initial_num_seed_compounds)
+        self.initial_compound_seed = (
+            int(initial_compound_seed)
+            if initial_compound_seed is not None
+            else None
+        )
         self.compute_elemental_from_oracle = compute_elemental_from_oracle
         self.stability_tolerance = stability_tolerance
         self.include_near_stable_from_ground_truth = bool(
@@ -114,6 +131,12 @@ class ConvexHullEnvironment(Environment):
         )
         self.filter_by_smact = filter_by_smact
         self.max_stoichiometry = max_stoichiometry
+        if self.initial_num_seed_compounds < 0:
+            raise ValueError("initial_num_seed_compounds must be non-negative")
+        if self.initial_num_seed_compounds > 0 and self.initial_compound_seed is None:
+            raise ValueError(
+                "initial_compound_seed must be set when initial_num_seed_compounds > 0"
+            )
         # Initialize structure matcher for novelty detection
         self.structure_matcher = StructureMatcher(
             ltol=structure_matcher_ltol,
@@ -188,8 +211,15 @@ class ConvexHullEnvironment(Environment):
         if self.compute_elemental_from_oracle:
             self._compute_elemental_energies_with_oracle()
 
-        # Initialize observed PD - either with elemental references only or all stable entries
-        if self.start_with_all_stable:
+        # Initialize observed PD from one of the supported bootstrap modes.
+        if self.initial_num_seed_compounds > 0:
+            self.observed_entries = self._get_seeded_initial_entries()
+            logger.info(
+                "Starting PD with %d elemental references and %d seeded compound compositions",
+                len([e for e in self.observed_entries if len(e.composition.elements) == 1]),
+                len([e for e in self.observed_entries if len(e.composition.elements) >= 2]),
+            )
+        elif self.start_with_all_stable:
             # Include (near-)stable entries from ground truth, re-evaluated with oracle
             self.observed_entries: list[PDEntry] = (
                 self._get_oracle_evaluated_stable_entries()
@@ -251,7 +281,16 @@ class ConvexHullEnvironment(Environment):
         self.history = []
 
         # Reset observed PD based on initialization setting
-        if self.start_with_all_stable:
+        if self.initial_num_seed_compounds > 0:
+            self.observed_entries = self._get_seeded_initial_entries()
+            num_compounds = sum(
+                1 for entry in self.observed_entries if len(entry.composition.elements) >= 2
+            )
+            message = (
+                "Environment reset: elemental references plus "
+                f"{num_compounds} seeded compound compositions."
+            )
+        elif self.start_with_all_stable:
             self.observed_entries = self._get_oracle_evaluated_stable_entries()
             message = f"Environment reset: {len(self.observed_entries)} oracle-evaluated (near-)stable entries."
         else:
@@ -347,8 +386,15 @@ class ConvexHullEnvironment(Environment):
         return obs, done
 
     # ---- Accessors ----
-    def get_state(self) -> dict[str, Any]:
-        """Return the current state of the environment."""
+    def get_state(self, include_counterfactual_state: bool = False) -> dict[str, Any]:
+        """Return the current state of the environment.
+
+        Args:
+            include_counterfactual_state: If True, also include ``proposed_entries``
+                and ``newly_discovered_entries`` so a consumer can reconstruct the
+                full environment state at this timestep and perform counterfactual
+                rollouts without replaying the episode from scratch.
+        """
         last_observation = None
         if self.history:
             # Return a copy to avoid mutating `self.history[-1]` in-place.
@@ -356,7 +402,7 @@ class ConvexHullEnvironment(Environment):
             proposal = last_observation.get("proposal")
             if isinstance(proposal, Structure):
                 last_observation["proposal"] = proposal.as_dict()
-        return {
+        result: dict[str, Any] = {
             "query_count": self.query_count,
             "elements": [str(e) for e in self.dataset.elements],
             "phase_diagram_all_entries": [
@@ -365,6 +411,12 @@ class ConvexHullEnvironment(Environment):
             "last_observation": last_observation,
             "stability_tolerance": self.stability_tolerance,
         }
+        if include_counterfactual_state:
+            result["proposed_entries"] = [e.as_dict() for e in self.proposed_entries]
+            result["newly_discovered_entries"] = [
+                e.as_dict() for e in self.newly_discovered_entries
+            ]
+        return result
 
     def get_pd_plot(
         self,
@@ -798,6 +850,88 @@ class ConvexHullEnvironment(Environment):
 
         logger.info(f"Created {len(oracle_evaluated_entries)} oracle-evaluated entries")
         return oracle_evaluated_entries
+
+    def _get_seeded_initial_entries(self) -> list[PDEntry]:
+        """Build deterministic initial entries from elemental refs plus sampled compounds."""
+        elemental_entries = self._get_oracle_evaluated_elemental_entries()
+        selected_entries = self._select_seed_compound_entries()
+
+        seeded_compound_entries: list[PDEntry] = []
+        selected_formulas: list[str] = []
+        for entry in selected_entries:
+            structure = extract_structure_from_entry(entry)
+            if structure is None:
+                logger.warning(
+                    "Skipping seeded entry %s because it does not have a structure",
+                    entry.composition.reduced_formula,
+                )
+                continue
+            oracle_result = self.oracle.evaluate(structure)
+            seeded_compound_entries.append(
+                structure_result_to_entry(structure, oracle_result)
+            )
+            selected_formulas.append(entry.composition.reduced_formula)
+
+        logger.info(
+            "Selected seeded initial compound compositions for %s with seed=%s: %s",
+            self._canonical_system_id(),
+            self.initial_compound_seed,
+            ", ".join(selected_formulas) if selected_formulas else "<none>",
+        )
+        return elemental_entries + seeded_compound_entries
+
+    def _select_seed_compound_entries(self) -> list[PDEntry]:
+        """Select one representative stable entry per composition, then sample formulas."""
+        epsilon_gt = (
+            self.stability_tolerance
+            if self.include_near_stable_from_ground_truth
+            else 0.0
+        )
+
+        representative_by_formula: dict[str, PDEntry] = {}
+        for entry in self.ground_truth_pd.all_entries:
+            if len(entry.composition.elements) < 2:
+                continue
+            if safe_e_above_hull(self.ground_truth_pd, entry) > epsilon_gt:
+                continue
+
+            reduced_formula = entry.composition.reduced_formula
+            current = representative_by_formula.get(reduced_formula)
+            if current is None or self._entry_sort_key(entry) < self._entry_sort_key(
+                current
+            ):
+                representative_by_formula[reduced_formula] = entry
+
+        if not representative_by_formula:
+            return []
+
+        formulas = sorted(representative_by_formula)
+        num_to_select = min(self.initial_num_seed_compounds, len(formulas))
+        rng = random.Random(self._seeded_compound_rng_seed())
+        selected_formulas = sorted(rng.sample(formulas, num_to_select))
+        return [representative_by_formula[formula] for formula in selected_formulas]
+
+    def _canonical_system_id(self) -> str:
+        return "-".join(sorted(str(element) for element in self.dataset.elements))
+
+    def _seeded_compound_rng_seed(self) -> int:
+        if self.initial_compound_seed is None:
+            raise ValueError("initial_compound_seed is required for seeded initialization")
+        seed_material = (
+            f"{self._canonical_system_id()}|initial-compounds|{self.initial_compound_seed}"
+        )
+        digest = hashlib.sha256(seed_material.encode("utf-8")).digest()
+        return int.from_bytes(digest[:8], byteorder="big", signed=False)
+
+    @staticmethod
+    def _entry_sort_key(entry: PDEntry) -> tuple[Any, ...]:
+        """Build a stable key for deterministic representative selection."""
+        return (
+            entry.composition.reduced_formula,
+            entry.composition.formula,
+            float(entry.energy_per_atom),
+            json.dumps(entry.as_dict(), sort_keys=True),
+        )
 
     def _get_initial_structures(self) -> list[Structure]:
         """Get all structures from the initial observed phase diagram."""

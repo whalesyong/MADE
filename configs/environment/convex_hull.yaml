@@ -10,6 +10,8 @@ budget: 5
 
 # Initialization mode
 start_with_all_stable: true # false means start with elemental references only, true means start with all stable entries from MP
+initial_num_seed_compounds: 0 # if > 0, start with elemental refs plus this many deterministically sampled stable compound compositions
+initial_compound_seed: null # numeric seed used for the deterministic initial compound subset
 compute_elemental_from_oracle: true # if true, compute elemental reference energies using oracle from dataset structures
 
 # Stability thresholds

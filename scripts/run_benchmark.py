@@ -345,16 +345,67 @@ def run_episode_local(
     if checkpoint_path is None:
         checkpoint_path = get_checkpoint_path(episode_id, wandb_run_name, system_id)
 
+    episode_config = OmegaConf.create(OmegaConf.to_container(config, resolve=False))
+    vary_starting_seed = bool(
+        OmegaConf.select(
+            episode_config,
+            "experiment.vary_starting_seed_per_episode",
+            default=False,
+        )
+    )
+    if vary_starting_seed:
+        base_seed = OmegaConf.select(
+            episode_config, "experiment.starting_seed_base", default=None
+        )
+        if base_seed is None:
+            base_seed = OmegaConf.select(
+                episode_config, "environment.initial_compound_seed", default=None
+            )
+        if base_seed is None:
+            base_seed = OmegaConf.select(episode_config, "experiment.seed", default=0)
+        episode_seed = int(base_seed) + int(episode_id)
+        OmegaConf.update(
+            episode_config,
+            "environment.initial_compound_seed",
+            episode_seed,
+            force_add=True,
+        )
+        logger.info(
+            "Episode %d for %s will use initial compound seed %d",
+            episode_id,
+            system_id or "<single-system>",
+            episode_seed,
+        )
+        if (
+            int(
+                OmegaConf.select(
+                    episode_config,
+                    "environment.initial_num_seed_compounds",
+                    default=0,
+                )
+            )
+            <= 0
+        ):
+            logger.warning(
+                "vary_starting_seed_per_episode is enabled, but "
+                "environment.initial_num_seed_compounds <= 0 so the starting set will not change"
+            )
+
+    if config.logger.get("use_wandb", False):
+        wandb.config.update(flatten_dict(OmegaConf.to_container(episode_config, resolve=False)))
+
     # Build components via Hydra
-    dataset = instantiate(config.dataset)
-    oracle = instantiate(config.oracle)
-    env = instantiate(config.environment, dataset=dataset, oracle=oracle)
-    agent = instantiate(config.agent)
+    dataset = instantiate(episode_config.dataset)
+    oracle = instantiate(episode_config.oracle)
+    env = instantiate(episode_config.environment, dataset=dataset, oracle=oracle)
+    agent = instantiate(episode_config.agent)
 
     # Reflexion: inject reflections from prior episodes (episode_id > 0 only)
-    reflexion_enabled = OmegaConf.select(config, "agent.enable_reflexion", default=False)
+    reflexion_enabled = OmegaConf.select(
+        episode_config, "agent.enable_reflexion", default=False
+    )
     if reflexion_enabled and episode_id > 0 and hasattr(agent, "reflections"):
-        reflections_path = get_reflections_path(config, system_id)
+        reflections_path = get_reflections_path(episode_config, system_id)
         prior_reflections = load_reflections(reflections_path)
         if prior_reflections:
             agent.reflections = prior_reflections
@@ -364,10 +415,12 @@ def run_episode_local(
     
     # Initial family prompt injection: on episode 0, inject a guidance message
     # telling the agent to focus on specific (hard/easy) composition families.
-    initial_family_mode = OmegaConf.select(config, "experiment.initial_family_mode", default=None)
+    initial_family_mode = OmegaConf.select(
+        episode_config, "experiment.initial_family_mode", default=None
+    )
     if initial_family_mode and episode_id == 0 and hasattr(agent, "reflections"):
         initial_family_file = OmegaConf.select(
-            config, "experiment.initial_family_file",
+            episode_config, "experiment.initial_family_file",
             default="./data/initial_family_prompts.json",
         )
         family_data = json.loads(Path(initial_family_file).read_text())
@@ -390,7 +443,14 @@ def run_episode_local(
     # Configure rollout saving if requested.
     # Each step is appended as one JSONL line to:
     #   <rollout_save_dir>/<system_id>/episode_<N>.jsonl
-    rollout_save_dir_cfg = OmegaConf.select(config, "experiment.rollout_save_dir", default=None)
+    rollout_save_dir_cfg = OmegaConf.select(
+        episode_config, "experiment.rollout_save_dir", default=None
+    )
+    rollout_save_full_state = bool(
+        OmegaConf.select(
+            episode_config, "experiment.rollout_save_full_state", default=False
+        )
+    )
     rollout_file: Path | None = None
     if rollout_save_dir_cfg:
         rollout_root = Path(rollout_save_dir_cfg)
@@ -432,6 +492,13 @@ def run_episode_local(
     try:
         while not env.is_done():
             state = env.get_state()
+            # Capture full pre-step state (with proposed/newly_discovered entries) only
+            # when rollout saving is active and the full-state flag is set, to avoid
+            # the serialization overhead on every step otherwise.
+            if rollout_file is not None and rollout_save_full_state:
+                pre_step_state = env.get_state(include_counterfactual_state=True)
+            else:
+                pre_step_state = state
             _, struct = agent(state)
             obs, _ = env.step(struct)
             # Save pre-step env state + action + post-step obs for DPO rollouts.
@@ -445,7 +512,12 @@ def run_episode_local(
                     "step": query_count,
                     "episode_id": episode_id,
                     "system_id": system_id,
-                    "pre_step_env_state": state,
+                    "initial_compound_seed": OmegaConf.select(
+                        episode_config,
+                        "environment.initial_compound_seed",
+                        default=None,
+                    ),
+                    "pre_step_env_state": pre_step_state,
                     "action": struct.as_dict(),
                     "post_step_obs": obs_serializable,
                     "metrics": env.get_latest_metrics(),
@@ -473,7 +545,16 @@ def run_episode_local(
             metrics_history = None
             if hasattr(env, "get_metrics_history"):
                 metrics_history = env.get_metrics_history()
-            save_checkpoint(checkpoint_path, agent_state, env_state, trajectory, query_count, wandb_run_id, metrics_history, config)
+            save_checkpoint(
+                checkpoint_path,
+                agent_state,
+                env_state,
+                trajectory,
+                query_count,
+                wandb_run_id,
+                metrics_history,
+                episode_config,
+            )
             # Commit volume to persist checkpoint (only on Modal)
             try:
                 checkpoint_volume.commit()
@@ -483,7 +564,7 @@ def run_episode_local(
 
             with open(tmp_trajectory_file, "w") as f:
                 json.dump(trajectory, f, indent=2)
-            if config.experiment.verbose:
+            if episode_config.experiment.verbose:
                 logger.info(f"Observation: {obs}")
                 logger.info(
                     f"Metrics: {json.dumps(env.get_latest_metrics(), indent=2)}"
@@ -494,7 +575,7 @@ def run_episode_local(
                     )
 
             # Log step-level metrics to wandb
-            if config.logger.get("use_wandb", False):
+            if episode_config.logger.get("use_wandb", False):
                 step_metrics = {"episode_id": episode_id, "query_count": query_count}
                 # Log any numeric values from the observation, convert bool to int
                 for k, v in obs.items():
@@ -526,7 +607,16 @@ def run_episode_local(
         metrics_history = None
         if hasattr(env, "get_metrics_history"):
             metrics_history = env.get_metrics_history()
-        save_checkpoint(checkpoint_path, agent_state, env_state, trajectory, query_count, wandb_run_id, metrics_history, config)
+        save_checkpoint(
+            checkpoint_path,
+            agent_state,
+            env_state,
+            trajectory,
+            query_count,
+            wandb_run_id,
+            metrics_history,
+            episode_config,
+        )
         try:
             checkpoint_volume.commit()
         except NameError:
@@ -546,11 +636,11 @@ def run_episode_local(
     # Reflexion: generate self-reflection and persist for the next episode
     if reflexion_enabled and hasattr(agent, "generate_reflection"):
         stability_tolerance = OmegaConf.select(
-            config, "environment.stability_tolerance", default=1e-8
+            episode_config, "environment.stability_tolerance", default=1e-8
         )
         agent.generate_reflection(env.get_latest_metrics(), stability_tolerance)
         if agent.reflections:
-            reflections_path = get_reflections_path(config, system_id)
+            reflections_path = get_reflections_path(episode_config, system_id)
             save_reflections(reflections_path, agent.reflections)
     results["metrics"] = final_metrics
     results["trajectory"] = trajectory
@@ -560,7 +650,7 @@ def run_episode_local(
     # results["final_agent_state"] = agent.get_state()
 
     # Log final episode metrics to wandb
-    if config.logger.get("use_wandb", False):
+    if episode_config.logger.get("use_wandb", False):
         wandb.log(final_metrics)
         wandb.finish()
 

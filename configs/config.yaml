@@ -34,6 +34,15 @@ experiment:
   # to this directory for use in DPO preference learning.
   # Files are written as: <rollout_save_dir>/<system_id>/episode_<N>.jsonl
   rollout_save_dir: null
+  # If true (and rollout_save_dir is set), include proposed_entries and
+  # newly_discovered_entries in pre_step_env_state so that counterfactual rollouts
+  # can be performed from any timestep t without replaying from step 0.
+  rollout_save_full_state: false
+  # If true, set environment.initial_compound_seed to starting_seed_base + episode_id
+  # so repeated episodes for the same system use different deterministic starting sets.
+  vary_starting_seed_per_episode: false
+  # Base numeric seed used when vary_starting_seed_per_episode is enabled.
+  starting_seed_base: 0
 
 hydra:
   run:
@@ -41,4 +50,3 @@ hydra:
   sweep:
     dir: ${hydra.run.dir}
     subdir: ${hydra.job.num}
-
