@@ -148,6 +148,23 @@ uv run scripts/run_baseline_experiments.py \
   --starting-seed-base 0
 ```
 
+### LLM environment variables
+
+For the LLM ReAct orchestrator, the actor and reflector endpoints default to
+local vLLM servers, so you only need to override them when your setup differs
+from the defaults:
+
+- `VLLM_API_KEY`: required if your vLLM server enforces auth.
+- `MODEL_STR`: optional override for the actor model. Defaults to
+  `openai/Qwen/Qwen3-30B-A3B-Instruct-2507-FP8`.
+- `VLLM_ACTPORT`: optional actor port override. Defaults to `8000`, so the
+  actor base URL is `http://127.0.0.1:8000/v1` unless you change it.
+- `REFLECTOR_MODEL_STR`: optional override for the reflector model. Defaults
+  to the actor model unless you set it separately.
+- `VLLM_REFPORT`: optional reflector port override. Defaults to `8000`, so
+  the reflector also uses `http://127.0.0.1:8000/v1` unless you run it on a
+  different port.
+
 Or a single run (one system):
 
 ```bash
