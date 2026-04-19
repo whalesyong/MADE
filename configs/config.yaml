@@ -38,6 +38,16 @@ experiment:
   # newly_discovered_entries in pre_step_env_state so that counterfactual rollouts
   # can be performed from any timestep t without replaying from step 0.
   rollout_save_full_state: false
+  # Stage 1 (sign-agreement validation) support.
+  # If true, keep per-step checkpoint snapshots at
+  #   <checkpoint_dir>/<run>/<system_id>/episode_NNN/checkpoint_step_KKKK.json
+  # and do NOT delete the rolling checkpoint.json on successful episode completion.
+  # Required by scripts/run_branch_from_state.py to launch counterfactual rollouts.
+  preserve_checkpoints: false
+  # If true, attempt to capture per-action log-prob sums from the actor LM
+  # (only meaningful when the actor is served through vLLM with logprobs enabled).
+  # Captured values are stamped into the rollout JSONL as `action_logprobs`.
+  capture_action_logprobs: false
   # If true, set environment.initial_compound_seed to starting_seed_base + episode_id
   # so repeated episodes for the same system use different deterministic starting sets.
   vary_starting_seed_per_episode: false

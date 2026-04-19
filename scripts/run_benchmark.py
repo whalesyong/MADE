@@ -161,8 +161,15 @@ def save_checkpoint(
     wandb_run_id: str | None = None,
     metrics_history: list[dict[str, Any]] | None = None,
     config: DictConfig | None = None,
+    preserve_per_step: bool = False,
 ) -> None:
-    """Save checkpoint with agent state, env state, trajectory, wandb run ID, metrics history, and config."""
+    """Save checkpoint with agent state, env state, trajectory, wandb run ID, metrics history, and config.
+
+    When preserve_per_step is True, additionally writes an immutable per-step copy
+    at <episode_dir>/checkpoint_step_{query_count:04d}.json so that Stage 2
+    counterfactual rollouts can branch from any visited state after the
+    episode completes.
+    """
     checkpoint = {
         "agent_state": agent_state,
         "env_state": env_state,
@@ -180,6 +187,15 @@ def save_checkpoint(
         json.dump(checkpoint, f, indent=2)
     temp_path.replace(checkpoint_path)
     logger.info(f"Saved checkpoint to {checkpoint_path} (query_count={query_count})")
+
+    if preserve_per_step:
+        per_step_path = (
+            checkpoint_path.parent / f"checkpoint_step_{query_count:04d}.json"
+        )
+        per_step_tmp = per_step_path.with_suffix(".tmp.json")
+        with open(per_step_tmp, "w") as f:
+            json.dump(checkpoint, f, indent=2)
+        per_step_tmp.replace(per_step_path)
 
 
 def load_checkpoint(checkpoint_path: Path) -> dict[str, Any] | None:
@@ -451,6 +467,24 @@ def run_episode_local(
             episode_config, "experiment.rollout_save_full_state", default=False
         )
     )
+    preserve_checkpoints = bool(
+        OmegaConf.select(
+            episode_config, "experiment.preserve_checkpoints", default=False
+        )
+    )
+    capture_action_logprobs = bool(
+        OmegaConf.select(
+            episode_config, "experiment.capture_action_logprobs", default=False
+        )
+    )
+    if capture_action_logprobs:
+        # Env flag is read inside build_dspy_lm so LMs constructed deep in
+        # agent code also opt in without needing the flag threaded through.
+        os.environ["MADE_CAPTURE_LOGPROBS"] = "1"
+        from made.utils.logprob_capture import drain as _drain_logprobs
+        from made.utils.logprob_capture import enable as _enable_logprobs
+
+        _enable_logprobs()
     rollout_file: Path | None = None
     if rollout_save_dir_cfg:
         rollout_root = Path(rollout_save_dir_cfg)
@@ -499,7 +533,16 @@ def run_episode_local(
                 pre_step_state = env.get_state(include_counterfactual_state=True)
             else:
                 pre_step_state = state
+            # Capture agent state *before* calling the agent so it reflects the
+            # policy state at the moment of decision (what Stage 2 needs to
+            # rehydrate to reproduce the sampling distribution at step k).
+            pre_step_agent_state = (
+                agent.get_state()
+                if rollout_file is not None and rollout_save_full_state
+                else None
+            )
             _, struct = agent(state)
+            action_logprobs = _drain_logprobs() if capture_action_logprobs else None
             obs, _ = env.step(struct)
             # Save pre-step env state + action + post-step obs for DPO rollouts.
             if rollout_file is not None:
@@ -522,6 +565,10 @@ def run_episode_local(
                     "post_step_obs": obs_serializable,
                     "metrics": env.get_latest_metrics(),
                 }
+                if pre_step_agent_state is not None:
+                    rollout_record["pre_step_agent_state"] = pre_step_agent_state
+                if action_logprobs is not None:
+                    rollout_record["action_logprobs"] = action_logprobs
                 with rollout_file.open("a", encoding="utf-8") as _rf:
                     _rf.write(json.dumps(rollout_record, ensure_ascii=False) + "\n")
             agent_behavior_metrics = {}
@@ -554,6 +601,7 @@ def run_episode_local(
                 wandb_run_id,
                 metrics_history,
                 episode_config,
+                preserve_per_step=preserve_checkpoints,
             )
             # Commit volume to persist checkpoint (only on Modal)
             try:
@@ -654,14 +702,20 @@ def run_episode_local(
         wandb.log(final_metrics)
         wandb.finish()
 
-    # Clean up checkpoint file after successful completion
-    if checkpoint_path.exists():
+    # Clean up checkpoint file after successful completion, unless the user
+    # asked to preserve per-step checkpoints for Stage 2 branching.
+    if checkpoint_path.exists() and not preserve_checkpoints:
         checkpoint_path.unlink()
         logger.info(f"Removed checkpoint file {checkpoint_path} after successful completion")
         try:
             checkpoint_volume.commit()
         except NameError:
             pass
+    elif preserve_checkpoints:
+        logger.info(
+            f"preserve_checkpoints=true — keeping {checkpoint_path} and per-step "
+            f"snapshots for counterfactual branching."
+        )
 
     return results
 

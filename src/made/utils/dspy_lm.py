@@ -46,4 +46,16 @@ def build_dspy_lm(llm_config: Any) -> dspy.LM:
     extra_kwargs = _cfg_get(llm_config, "extra_kwargs", {}) or {}
     kwargs.update(dict(extra_kwargs))
 
-    return dspy.LM(model, **kwargs)
+    lm = dspy.LM(model, **kwargs)
+
+    # Optional log-prob capture for Stage 1 actor rollouts. Opt-in via either the
+    # llm_config field or the process-wide env flag set by run_benchmark.py.
+    capture = bool(_cfg_get(llm_config, "capture_logprobs", False)) or (
+        os.getenv("MADE_CAPTURE_LOGPROBS") == "1"
+    )
+    if capture:
+        from made.utils.logprob_capture import LogProbCapturingLM, enable
+
+        enable()
+        lm = LogProbCapturingLM(lm)
+    return lm

@@ -74,6 +74,8 @@ def run_single_baseline_experiment(
     parallel_systems: int = 1,
     rollout_save_dir: str | None = None,
     rollout_save_full_state: bool = False,
+    preserve_checkpoints: bool = False,
+    capture_action_logprobs: bool = False,
     initial_num_seed_compounds: int = 0,
     vary_starting_seed_per_episode: bool = False,
     starting_seed_base: int = 0,
@@ -156,6 +158,12 @@ def run_single_baseline_experiment(
     if rollout_save_full_state:
         config_overrides.append("++experiment.rollout_save_full_state=true")
 
+    if preserve_checkpoints:
+        config_overrides.append("++experiment.preserve_checkpoints=true")
+
+    if capture_action_logprobs:
+        config_overrides.append("++experiment.capture_action_logprobs=true")
+
     if initial_num_seed_compounds > 0:
         config_overrides.append(
             f"environment.initial_num_seed_compounds={initial_num_seed_compounds}"
@@ -187,6 +195,8 @@ def run_single_baseline_experiment(
         "initial_family_file": initial_family_file,
         "rollout_save_dir": rollout_save_dir,
         "rollout_save_full_state": rollout_save_full_state,
+        "preserve_checkpoints": preserve_checkpoints,
+        "capture_action_logprobs": capture_action_logprobs,
         "initial_num_seed_compounds": initial_num_seed_compounds,
         "vary_starting_seed_per_episode": vary_starting_seed_per_episode,
         "starting_seed_base": starting_seed_base,
@@ -313,6 +323,8 @@ def run_multiple_baseline_experiments(
     parallel_systems: int = 1,
     rollout_save_dir: str | None = None,
     rollout_save_full_state: bool = False,
+    preserve_checkpoints: bool = False,
+    capture_action_logprobs: bool = False,
     initial_num_seed_compounds: int = 0,
     vary_starting_seed_per_episode: bool = False,
     starting_seed_base: int = 0,
@@ -369,6 +381,8 @@ def run_multiple_baseline_experiments(
                 use_wandb=use_wandb,
                 rollout_save_dir=rollout_save_dir,
                 rollout_save_full_state=rollout_save_full_state,
+                preserve_checkpoints=preserve_checkpoints,
+                capture_action_logprobs=capture_action_logprobs,
                 initial_num_seed_compounds=initial_num_seed_compounds,
                 vary_starting_seed_per_episode=vary_starting_seed_per_episode,
                 starting_seed_base=starting_seed_base,
@@ -553,6 +567,24 @@ def main():
         ),
     )
     parser.add_argument(
+        "--preserve-checkpoints",
+        action="store_true",
+        default=False,
+        help=(
+            "Keep per-step checkpoint_step_NNNN.json snapshots for Stage 2 "
+            "counterfactual branching (run_branch_from_state.py)."
+        ),
+    )
+    parser.add_argument(
+        "--capture-action-logprobs",
+        action="store_true",
+        default=False,
+        help=(
+            "Force logprobs=True on actor LM calls and record per-completion "
+            "log-prob sums in the rollout JSONL (Stage 1 drift insurance)."
+        ),
+    )
+    parser.add_argument(
         "--initial-num-seed-compounds",
         type=int,
         default=0,
@@ -622,6 +654,8 @@ def main():
         parallel_systems=args.parallel_systems,
         rollout_save_dir=args.rollout_save_dir,
         rollout_save_full_state=args.rollout_save_full_state,
+        preserve_checkpoints=args.preserve_checkpoints,
+        capture_action_logprobs=args.capture_action_logprobs,
         initial_num_seed_compounds=args.initial_num_seed_compounds,
         vary_starting_seed_per_episode=args.vary_starting_seed_per_episode,
         starting_seed_base=args.starting_seed_base,
