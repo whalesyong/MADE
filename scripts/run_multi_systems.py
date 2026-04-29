@@ -108,7 +108,7 @@ def _run_system_local(
     Episodes run sequentially to preserve the reflexion invariant: episode N+1
     reads the reflection file written by episode N before it starts.
     """
-    dotenv.load_dotenv()
+    dotenv.load_dotenv("vllm.env")
 
     rb = _import_run_benchmark()
     cfg_sys = OmegaConf.create(cfg_container)
@@ -130,7 +130,7 @@ def _run_system_local(
 
 @hydra.main(version_base=None, config_path="../configs", config_name="config")
 def run_multi_systems(config: DictConfig) -> None:
-    dotenv.load_dotenv()
+    dotenv.load_dotenv("vllm.env")
 
     # Configure logging level from config
     log_level = config.experiment.get("logging_level", "INFO")

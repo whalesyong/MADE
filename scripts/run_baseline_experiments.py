@@ -621,7 +621,7 @@ def main():
         datefmt="%Y-%m-%d %H:%M:%S",
     )
 
-    dotenv.load_dotenv()
+    dotenv.load_dotenv("vllm.env")
 
     # Create timestamped base directory for this run
     timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
