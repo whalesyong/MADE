@@ -77,6 +77,7 @@ def run_single_baseline_experiment(
     preserve_checkpoints: bool = False,
     capture_action_logprobs: bool = False,
     initial_num_seed_compounds: int = 0,
+    initial_compound_seed: int | None = None,
     vary_starting_seed_per_episode: bool = False,
     starting_seed_base: int = 0,
 ) -> Path:
@@ -102,6 +103,7 @@ def run_single_baseline_experiment(
         rollout_save_full_state: If True, include proposed_entries and newly_discovered_entries
             in pre_step_env_state for counterfactual rollouts (requires rollout_save_dir)
         initial_num_seed_compounds: Number of deterministic starting compound compositions
+        initial_compound_seed: Numeric seed controlling which specific compounds are preloaded
         vary_starting_seed_per_episode: If True, use a different starting seed per episode
         starting_seed_base: Base numeric seed for per-episode starting seed variation
 
@@ -168,6 +170,10 @@ def run_single_baseline_experiment(
         config_overrides.append(
             f"environment.initial_num_seed_compounds={initial_num_seed_compounds}"
         )
+        if initial_compound_seed is not None:
+            config_overrides.append(
+                f"environment.initial_compound_seed={initial_compound_seed}"
+            )
 
     if vary_starting_seed_per_episode:
         config_overrides.append("++experiment.vary_starting_seed_per_episode=true")
@@ -198,6 +204,7 @@ def run_single_baseline_experiment(
         "preserve_checkpoints": preserve_checkpoints,
         "capture_action_logprobs": capture_action_logprobs,
         "initial_num_seed_compounds": initial_num_seed_compounds,
+        "initial_compound_seed": initial_compound_seed,
         "vary_starting_seed_per_episode": vary_starting_seed_per_episode,
         "starting_seed_base": starting_seed_base,
         "config_overrides": config_overrides,
@@ -326,6 +333,7 @@ def run_multiple_baseline_experiments(
     preserve_checkpoints: bool = False,
     capture_action_logprobs: bool = False,
     initial_num_seed_compounds: int = 0,
+    initial_compound_seed: int | None = None,
     vary_starting_seed_per_episode: bool = False,
     starting_seed_base: int = 0,
 ) -> dict[str, Path | None]:
@@ -350,6 +358,7 @@ def run_multiple_baseline_experiments(
         rollout_save_full_state: If True, include proposed_entries and newly_discovered_entries
             in pre_step_env_state for counterfactual rollouts (requires rollout_save_dir)
         initial_num_seed_compounds: Number of deterministic starting compound compositions
+        initial_compound_seed: Numeric seed controlling which specific compounds are preloaded
         vary_starting_seed_per_episode: If True, use a different starting seed per episode
         starting_seed_base: Base numeric seed for per-episode starting seed variation
 
@@ -384,7 +393,7 @@ def run_multiple_baseline_experiments(
                 preserve_checkpoints=preserve_checkpoints,
                 capture_action_logprobs=capture_action_logprobs,
                 initial_num_seed_compounds=initial_num_seed_compounds,
-                vary_starting_seed_per_episode=vary_starting_seed_per_episode,
+                initial_compound_seed=initial_compound_seed,                vary_starting_seed_per_episode=vary_starting_seed_per_episode,
                 starting_seed_base=starting_seed_base,
                 wandb_project=wandb_project,
                 wandb_tags=wandb_tags,
@@ -594,6 +603,16 @@ def main():
         ),
     )
     parser.add_argument(
+        "--initial-compound-seed",
+        type=int,
+        default=None,
+        help=(
+            "Numeric seed controlling which specific stable compounds are preloaded "
+            "as starting seeds. Must be set when --initial-num-seed-compounds > 0. "
+            "Using the same value across runs guarantees identical starting compounds."
+        ),
+    )
+    parser.add_argument(
         "--vary-starting-seed-per-episode",
         action="store_true",
         default=False,
@@ -657,6 +676,7 @@ def main():
         preserve_checkpoints=args.preserve_checkpoints,
         capture_action_logprobs=args.capture_action_logprobs,
         initial_num_seed_compounds=args.initial_num_seed_compounds,
+        initial_compound_seed=args.initial_compound_seed,
         vary_starting_seed_per_episode=args.vary_starting_seed_per_episode,
         starting_seed_base=args.starting_seed_base,
     )
